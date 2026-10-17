@@ -12,6 +12,7 @@ dependencies:
   wakelock_plus: ^1.2.8
   google_fonts: ^6.2.1
   url_launcher: ^6.3.0
+  shared_preferences: ^2.2.2
 
 dev_dependencies:
   flutter_lints: ^4.0.0
