@@ -3,9 +3,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:wakelock_plus/wakelock_plus.dart';
 
+import '../models/gamepad_settings.dart';
 import '../models/gamepad_state.dart';
 import '../network/gamepad_socket.dart';
 import '../network/protocol.dart';
+import '../screens/settings_screen.dart';
 import '../theme.dart';
 import '../widgets/dpad_widget.dart';
 import '../widgets/gamepad_button_widget.dart';
@@ -23,6 +25,9 @@ class GamepadScreen extends StatefulWidget {
 class _GamepadScreenState extends State<GamepadScreen> {
   late final GamepadState _state;
   StreamSubscription? _connectionSubscription; // Handles the socket listener state
+  GamepadSettings? _settings;
+  Map<String, ButtonConfig> _configs = {};
+  bool _editMode = false;
 
   // Track D-pad states to only vibrate when a direction is freshly clicked down
   bool _upPressed = false;
@@ -50,12 +55,37 @@ class _GamepadScreenState extends State<GamepadScreen> {
       DeviceOrientation.landscapeRight,
     ]);
 
+    // Load pengaturan tombol dari SharedPreferences
+    GamepadSettings.create().then((settings) {
+      if (!mounted) return;
+      setState(() {
+        _settings = settings;
+        _configs = settings.loadConfigs();
+      });
+    });
+
     // Listen for disconnections automatically from the socket network manager
     _connectionSubscription = widget.socket.connectionStream.listen((isConnected) {
       if (!isConnected) {
         _handleConnectionLoss();
       }
     });
+  }
+
+  /// Buka layar pengaturan tombol.
+  Future<void> _openSettings() async {
+    if (_settings == null) return;
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => SettingsScreen(
+          settings: _settings!,
+          configs: Map<String, ButtonConfig>.from(_configs),
+          onSave: (newConfigs) {
+            setState(() => _configs = newConfigs);
+          },
+        ),
+      ),
+    );
   }
 
   @override
@@ -148,10 +178,44 @@ class _GamepadScreenState extends State<GamepadScreen> {
     }
   }
 
-  Widget _at(BoxConstraints c, double xFrac, double yFrac, double w, double h, Widget child) {
-    final left = c.maxWidth * xFrac - w / 2;
-    final top = c.maxHeight * yFrac - h / 2;
-    return Positioned(left: left, top: top, width: w, height: h, child: Center(child: child));
+  /// Buat widget berposisi berdasarkan config tombol. Saat _editMode aktif,
+  /// tombol bisa di-drag untuk mengganti posisinya secara visual.
+  Widget _atc(BoxConstraints c, String id, Widget child, {double? wOverride, double? hOverride}) {
+    final cfg = _configs[id];
+    if (cfg == null) return const SizedBox.shrink();
+
+    final w = (wOverride ?? cfg.width);
+    final h = (hOverride ?? cfg.height);
+
+    Widget content = Positioned(
+      left: c.maxWidth * cfg.xFrac - w / 2,
+      top: c.maxHeight * cfg.yFrac - h / 2,
+      width: w,
+      height: h,
+      child: Center(child: child),
+    );
+
+    if (_editMode) {
+      content = GestureDetector(
+        onPanUpdate: (d) {
+          final current = _configs[id];
+          if (current == null) return;
+          final curLeft = c.maxWidth * current.xFrac - w / 2;
+          final curTop = c.maxHeight * current.yFrac - h / 2;
+          final newLeft = curLeft + d.delta.dx;
+          final newTop = curTop + d.delta.dy;
+          setState(() {
+            _configs[id] = current.copyWith(
+              xFrac: ((newLeft + w / 2) / c.maxWidth).clamp(0.0, 1.0),
+              yFrac: ((newTop + h / 2) / c.maxHeight).clamp(0.0, 1.0),
+            );
+          });
+        },
+        child: content,
+      );
+    }
+
+    return content;
   }
 
   @override
@@ -173,7 +237,7 @@ class _GamepadScreenState extends State<GamepadScreen> {
               return Stack(
                 children: [
                   // LT - Left Trigger
-                  _at(c, 0.078, 0.182, 112, 112,
+                  _atc(c, 'lt',
                       TriggerWidget(
                         label: 'LT', 
                         size: 112, 
@@ -184,7 +248,7 @@ class _GamepadScreenState extends State<GamepadScreen> {
                       )),
 
                   // LB - Left Bumper
-                  _at(c, 0.184, 0.339, 70, 70,
+                  _atc(c, 'lb',
                       GamepadButtonWidget(
                         label: 'LB',
                         size: 70,
@@ -193,7 +257,7 @@ class _GamepadScreenState extends State<GamepadScreen> {
                       )),
 
                   // D-pad - Lower Left
-                  _at(c, 0.112, 0.620, 180, 180,
+                  _atc(c, 'dpad',
                       DpadWidget(
                         size: 150,
                         onChanged: ({required up, required down, required left, required right}) {
@@ -213,7 +277,7 @@ class _GamepadScreenState extends State<GamepadScreen> {
                       )),
 
                   // Disconnect - Top Center
-                  _at(c, 0.470, 0.068, 50, 50,
+                  _atc(c, 'disconnect',
                       GestureDetector(
                         onTap: _disconnect,
                         child: Container(
@@ -225,8 +289,24 @@ class _GamepadScreenState extends State<GamepadScreen> {
                         ),
                       )),
 
+                  // Settings / Gear - Top Center Right
+                  _atc(c, 'settings',
+                      GestureDetector(
+                        onTap: _openSettings,
+                        child: Container(
+                          width: 44,
+                          height: 44,
+                          alignment: Alignment.center,
+                          decoration: const BoxDecoration(
+                            color: AppColors.stickFill,
+                            shape: BoxShape.circle,
+                          ),
+                          child: const Icon(Icons.settings, color: Colors.white, size: 22),
+                        ),
+                      )),
+
                   // Menu / Guide / Start Row
-                  _at(c, 0.371, 0.242, 60, 60,
+                  _atc(c, 'menu',
                       GamepadButtonWidget(
                         label: '',
                         icon: Icons.menu,
@@ -234,7 +314,7 @@ class _GamepadScreenState extends State<GamepadScreen> {
                         color: AppColors.stickFill,
                         onChanged: (p) => _handleButtonPress(Protocol.bitBack, p),
                       )),
-                  _at(c, 0.470, 0.242, 68, 68,
+                  _atc(c, 'guide',
                       GamepadButtonWidget(
                         label: '',
                         icon: Icons.sports_esports,
@@ -242,7 +322,7 @@ class _GamepadScreenState extends State<GamepadScreen> {
                         color: AppColors.stickFill,
                         onChanged: (p) => _handleButtonPress(Protocol.bitGuide, p),
                       )),
-                  _at(c, 0.570, 0.242, 60, 60,
+                  _atc(c, 'start',
                       GamepadButtonWidget(
                         label: '',
                         icon: Icons.tune,
@@ -252,7 +332,7 @@ class _GamepadScreenState extends State<GamepadScreen> {
                       )),
 
                   // L3 / R3 Stick Clicks
-                  _at(c, 0.416, 0.475, 90, 56,
+                  _atc(c, 'l3',
                       GamepadButtonWidget(
                         label: 'LEFT',
                         pill: true,
@@ -260,7 +340,7 @@ class _GamepadScreenState extends State<GamepadScreen> {
                         color: AppColors.stickFill,
                         onChanged: (p) => _handleButtonPress(Protocol.bitLsClick, p),
                       )),
-                  _at(c, 0.526, 0.475, 90, 56,
+                  _atc(c, 'r3',
                       GamepadButtonWidget(
                         label: 'RIGHT',
                         pill: true,
@@ -270,7 +350,7 @@ class _GamepadScreenState extends State<GamepadScreen> {
                       )),
 
                   // Left stick
-                  _at(c, 0.310, 0.751, 160, 160,
+                  _atc(c, 'leftStick',
                       JoystickWidget(
                         size: 160, 
                         onChanged: (x, y) {
@@ -280,7 +360,7 @@ class _GamepadScreenState extends State<GamepadScreen> {
                       )),
 
                   // Right stick
-                  _at(c, 0.685, 0.751, 160, 160,
+                  _atc(c, 'rightStick',
                       JoystickWidget(
                         size: 160, 
                         onChanged: (x, y) {
@@ -290,7 +370,7 @@ class _GamepadScreenState extends State<GamepadScreen> {
                       )),
 
                   // RB - Upper Right
-                  _at(c, 0.815, 0.346, 70, 70,
+                  _atc(c, 'rb',
                       GamepadButtonWidget(
                         label: 'RB',
                         size: 70,
@@ -299,10 +379,10 @@ class _GamepadScreenState extends State<GamepadScreen> {
                       )),
 
                   // RT - Right Trigger
-                  _at(c, 0.922, 0.182, 112, 112,
+                  _atc(c, 'rt',
                       TriggerWidget(
-                        label: 'RT', 
-                        size: 112, 
+                        label: 'RT',
+                        size: 112,
                         onChanged: (v) {
                           _handleTriggerHaptic(v, false);
                           _state.setRightTrigger(v);
@@ -310,7 +390,7 @@ class _GamepadScreenState extends State<GamepadScreen> {
                       )),
 
                   // ABXY Diamond Layout
-                  _at(c, 0.890, 0.620, 150, 150, 
+                  _atc(c, 'faceButtons', 
                       _FaceButtons(onButtonPressed: _handleButtonPress, size: 150)),
                 ],
               );
