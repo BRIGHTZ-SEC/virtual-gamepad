@@ -62,6 +62,9 @@ jobs:
             echo "Using cached keystore."
           fi
 
+      - name: Analyze Dart code
+        run: flutter analyze --no-fatal-infos || true
+
       - name: Build unsigned release APKs (split per ABI + universal)
         run: |
           flutter build apk --release --split-per-abi --build-number=1
