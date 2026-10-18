@@ -90,7 +90,7 @@ class DefaultButtonConfigs {
   };
 
   /// Layout Classic — tombol A/B/X/Y, stick asimetris (mirip Xbox).
-  static const List<List<double>> _classic = [
+  static const List<List<Object>> _classic = [
     ['lt', 0.078, 0.182, 112.0, 112.0],
     ['lb', 0.184, 0.339, 70.0, 70.0],
     ['dpad', 0.112, 0.620, 180.0, 180.0],
@@ -110,7 +110,7 @@ class DefaultButtonConfigs {
   ///
   /// Catatan: pada controller Xbox, L3/R3 adalah tombol tekan pada stick
   /// itu sendiri, jadi tidak lagi digambar sebagai tombol terpisah di sini.
-  static const List<List<double>> _xbox = [
+  static const List<List<Object>> _xbox = [
     ['lt', 0.105, 0.175, 116.0, 116.0],
     ['lb', 0.215, 0.250, 68.0, 68.0],
     ['leftStick', 0.160, 0.310, 168.0, 168.0],
@@ -129,7 +129,7 @@ class DefaultButtonConfigs {
   ///
   /// Sama seperti Xbox, L3/R3 adalah tekan stick sehingga tidak digambar
   /// sebagai tombol terpisah.
-  static const List<List<double>> _ps = [
+  static const List<List<Object>> _ps = [
     ['lt', 0.100, 0.180, 110.0, 110.0],
     ['lb', 0.235, 0.245, 62.0, 62.0],
     ['dpad', 0.120, 0.330, 168.0, 168.0],
@@ -143,7 +143,7 @@ class DefaultButtonConfigs {
     ['faceButtons', 0.885, 0.320, 168.0, 168.0],
   ];
 
-  static List<List<double>> _rowsFor(ButtonLayout layout) {
+  static List<List<Object>> _rowsFor(ButtonLayout layout) {
     switch (layout) {
       case ButtonLayout.classic:
         return _classic;

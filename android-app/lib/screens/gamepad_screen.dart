@@ -58,7 +58,7 @@ class _GamepadScreenState extends State<GamepadScreen> {
   // ---------------- Macro ----------------
   // Tidak ada tombol macro secara default; muncul setelah user membuatnya
   // lewat ikon "Tambah Macro" di mode edit.
-  final Map<String, ButtonConfig> _macroConfigs = {};
+  Map<String, ButtonConfig> _macroConfigs = {};
   MacroManager? _macros;
   List<Macro> _macroList = [];
 
@@ -1133,9 +1133,11 @@ class _PsGlyphPainter extends CustomPainter {
         path.lineTo(w * 0.06, h * 0.88);
         path.close();
         canvas.drawPath(path, stroke);
+        break;
 
       case _PsGlyph.circle:
         canvas.drawCircle(Offset(w / 2, h / 2), w * 0.38, stroke);
+        break;
 
       case _PsGlyph.square:
         canvas.drawRRect(
@@ -1145,6 +1147,7 @@ class _PsGlyphPainter extends CustomPainter {
           ),
           stroke,
         );
+        break;
 
       case _PsGlyph.cross:
         path.moveTo(w * 0.12, h * 0.12);
@@ -1152,6 +1155,7 @@ class _PsGlyphPainter extends CustomPainter {
         path.moveTo(w * 0.88, h * 0.12);
         path.lineTo(w * 0.12, h * 0.88);
         canvas.drawPath(path, stroke);
+        break;
     }
   }
 
