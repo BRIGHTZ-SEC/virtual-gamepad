@@ -50,65 +50,191 @@ class ButtonConfig {
   }
 }
 
-/// Default konfigurasi tombol yang cocok dengan layout asli gamepad screen.
+/// Layout gamepad yang didukung.
+enum ButtonLayout {
+  classic('classic', 'Classic'),
+  xbox('xbox', 'Xbox'),
+  playstation('ps', 'PlayStation');
+
+  final String key;
+  final String label;
+
+  const ButtonLayout(this.key, this.label);
+
+  static ButtonLayout fromKey(String? key) {
+    for (final l in ButtonLayout.values) {
+      if (l.key == key) return l;
+    }
+    return ButtonLayout.xbox;
+  }
+}
+
+/// Definisi default posisi/ukuran tombol untuk tiap layout.
+///
+/// Koordinat memakai fraksi terhadap lebar/tinggi area gamepad, sehingga
+/// layout ikut menyesuaikan ukuran layar dan orientasi perangkat.
 class DefaultButtonConfigs {
-  static const List<Map<String, dynamic>> all = [
-    {'id': 'lt', 'xFrac': 0.078, 'yFrac': 0.182, 'width': 112.0, 'height': 112.0},
-    {'id': 'lb', 'xFrac': 0.184, 'yFrac': 0.339, 'width': 70.0, 'height': 70.0},
-    {'id': 'dpad', 'xFrac': 0.112, 'yFrac': 0.620, 'width': 180.0, 'height': 180.0},
-    {'id': 'settings', 'xFrac': 0.530, 'yFrac': 0.068, 'width': 44.0, 'height': 44.0},
-    {'id': 'saveLayout', 'xFrac': 0.590, 'yFrac': 0.068, 'width': 44.0, 'height': 44.0},
-    {'id': 'resetLayout', 'xFrac': 0.650, 'yFrac': 0.068, 'width': 44.0, 'height': 44.0},
-    {'id': 'disconnect', 'xFrac': 0.470, 'yFrac': 0.068, 'width': 50.0, 'height': 50.0},
-    {'id': 'menu', 'xFrac': 0.371, 'yFrac': 0.242, 'width': 60.0, 'height': 60.0},
-    {'id': 'guide', 'xFrac': 0.470, 'yFrac': 0.242, 'width': 68.0, 'height': 68.0},
-    {'id': 'start', 'xFrac': 0.570, 'yFrac': 0.242, 'width': 60.0, 'height': 60.0},
-    {'id': 'l3', 'xFrac': 0.416, 'yFrac': 0.475, 'width': 90.0, 'height': 56.0},
-    {'id': 'r3', 'xFrac': 0.526, 'yFrac': 0.475, 'width': 90.0, 'height': 56.0},
-    {'id': 'leftStick', 'xFrac': 0.310, 'yFrac': 0.751, 'width': 160.0, 'height': 160.0},
-    {'id': 'rightStick', 'xFrac': 0.685, 'yFrac': 0.751, 'width': 160.0, 'height': 160.0},
-    {'id': 'rb', 'xFrac': 0.815, 'yFrac': 0.346, 'width': 70.0, 'height': 70.0},
-    {'id': 'rt', 'xFrac': 0.922, 'yFrac': 0.182, 'width': 112.0, 'height': 112.0},
-    {'id': 'faceButtons', 'xFrac': 0.890, 'yFrac': 0.620, 'width': 150.0, 'height': 150.0},
+  // Ikon & label tombol aksi (kanan bawah) per layout.
+  static const List<String> xboxFaceLabels = ['Y', 'B', 'X', 'A'];
+  static const List<String> psFaceLabels = ['TRI', 'CIRC', 'SQU', 'X'];
+  static const List<String> classicFaceLabels = ['Y', 'B', 'X', 'A'];
+
+  /// Tombol kontrol umum (bisa dipakai di semua layout).
+  static const Map<String, List<double>> _shared = {
+    // id, xFrac, yFrac, width, height
+    'settings': [0.530, 0.068, 44.0, 44.0],
+    'saveLayout': [0.600, 0.068, 44.0, 44.0],
+    'resetLayout': [0.670, 0.068, 44.0, 44.0],
+    'addMacro': [0.740, 0.068, 44.0, 44.0],
+    'disconnect': [0.460, 0.068, 44.0, 44.0],
+  };
+
+  /// Layout Classic — tombol A/B/X/Y, stick asimetris (mirip Xbox).
+  static const List<List<double>> _classic = [
+    ['lt', 0.078, 0.182, 112.0, 112.0],
+    ['lb', 0.184, 0.339, 70.0, 70.0],
+    ['dpad', 0.112, 0.620, 180.0, 180.0],
+    ['menu', 0.371, 0.242, 60.0, 60.0],
+    ['guide', 0.470, 0.242, 68.0, 68.0],
+    ['start', 0.570, 0.242, 60.0, 60.0],
+    ['l3', 0.416, 0.475, 90.0, 56.0],
+    ['r3', 0.526, 0.475, 90.0, 56.0],
+    ['leftStick', 0.310, 0.751, 160.0, 160.0],
+    ['rightStick', 0.685, 0.751, 160.0, 160.0],
+    ['rb', 0.815, 0.346, 70.0, 70.0],
+    ['rt', 0.922, 0.182, 112.0, 112.0],
+    ['faceButtons', 0.890, 0.620, 150.0, 150.0],
   ];
 
-  static String labelFor(String id) {
-    switch (id) {
-      case 'lt': return 'LT (Left Trigger)';
-      case 'lb': return 'LB (Left Bumper)';
-      case 'dpad': return 'D-pad';
-      case 'disconnect': return 'Disconnect';
-      case 'settings': return 'Pengaturan (Gear)';
-      case 'saveLayout': return 'Simpan Layout';
-      case 'resetLayout': return 'Reset Layout';
-      case 'menu': return 'Menu / Back';
-      case 'guide': return 'Guide / Xbox';
-      case 'start': return 'Start';
-      case 'l3': return 'L3 (Left Stick Click)';
-      case 'r3': return 'R3 (Right Stick Click)';
-      case 'leftStick': return 'Joystick Kiri';
-      case 'rightStick': return 'Joystick Kanan';
-      case 'rb': return 'RB (Right Bumper)';
-      case 'rt': return 'RT (Right Trigger)';
-      case 'faceButtons': return 'Tombol A / B / X / Y';
-      default: return id;
+  /// Layout Xbox — D-pad kiri bawah, stick kiri atas, ABXY kanan tengah.
+  ///
+  /// Catatan: pada controller Xbox, L3/R3 adalah tombol tekan pada stick
+  /// itu sendiri, jadi tidak lagi digambar sebagai tombol terpisah di sini.
+  static const List<List<double>> _xbox = [
+    ['lt', 0.105, 0.175, 116.0, 116.0],
+    ['lb', 0.215, 0.250, 68.0, 68.0],
+    ['leftStick', 0.160, 0.310, 168.0, 168.0],
+    ['dpad', 0.135, 0.720, 190.0, 190.0],
+    ['menu', 0.410, 0.365, 54.0, 54.0],
+    ['guide', 0.500, 0.365, 62.0, 62.0],
+    ['start', 0.590, 0.365, 54.0, 54.0],
+    ['rb', 0.785, 0.250, 68.0, 68.0],
+    ['rt', 0.895, 0.175, 116.0, 116.0],
+    ['faceButtons', 0.855, 0.420, 168.0, 168.0],
+    ['rightStick', 0.845, 0.770, 168.0, 168.0],
+  ];
+
+  /// Layout PlayStation — D-pad kiri atas, face buttons kanan atas,
+  /// kedua analog stick simetris di sisi bawah.
+  ///
+  /// Sama seperti Xbox, L3/R3 adalah tekan stick sehingga tidak digambar
+  /// sebagai tombol terpisah.
+  static const List<List<double>> _ps = [
+    ['lt', 0.100, 0.180, 110.0, 110.0],
+    ['lb', 0.235, 0.245, 62.0, 62.0],
+    ['dpad', 0.120, 0.330, 168.0, 168.0],
+    ['leftStick', 0.310, 0.770, 168.0, 168.0],
+    ['rightStick', 0.690, 0.770, 168.0, 168.0],
+    ['menu', 0.405, 0.330, 52.0, 52.0],
+    ['guide', 0.500, 0.330, 60.0, 60.0],
+    ['start', 0.595, 0.330, 52.0, 52.0],
+    ['rb', 0.765, 0.245, 62.0, 62.0],
+    ['rt', 0.900, 0.180, 110.0, 110.0],
+    ['faceButtons', 0.885, 0.320, 168.0, 168.0],
+  ];
+
+  static List<List<double>> _rowsFor(ButtonLayout layout) {
+    switch (layout) {
+      case ButtonLayout.classic:
+        return _classic;
+      case ButtonLayout.xbox:
+        return _xbox;
+      case ButtonLayout.playstation:
+        return _ps;
     }
+    // Cadangan bila enum bertambah di masa depan.
+    return _xbox;
   }
 
-  /// Config default tanpa menyentuh SharedPreferences. Dipakai sebagai
-  /// fallback supaya UI tetap menampilkan tombol walau prefs gagal dimuat.
-  static Map<String, ButtonConfig> defaultConfigs() {
+  /// Config default untuk sebuah layout, sudah termasuk tombol kontrol umum.
+  static Map<String, ButtonConfig> defaultConfigs(ButtonLayout layout) {
     final Map<String, ButtonConfig> configs = {};
-    for (final d in all) {
-      configs[d['id'] as String] = ButtonConfig(
-        id: d['id'] as String,
-        xFrac: (d['xFrac'] as num).toDouble(),
-        yFrac: (d['yFrac'] as num).toDouble(),
-        width: (d['width'] as num).toDouble(),
-        height: (d['height'] as num).toDouble(),
+    for (final r in _rowsFor(layout)) {
+      configs[r[0] as String] = ButtonConfig(
+        id: r[0] as String,
+        xFrac: (r[1] as num).toDouble(),
+        yFrac: (r[2] as num).toDouble(),
+        width: (r[3] as num).toDouble(),
+        height: (r[4] as num).toDouble(),
+      );
+    }
+    for (final e in _shared.entries) {
+      final r = e.value;
+      configs[e.key] = ButtonConfig(
+        id: e.key,
+        xFrac: r[0],
+        yFrac: r[1],
+        width: r[2],
+        height: r[3],
       );
     }
     return configs;
+  }
+
+  /// Label tombol aksi sesuai layout.
+  static List<String> faceLabels(ButtonLayout layout) {
+    switch (layout) {
+      case ButtonLayout.classic:
+        return classicFaceLabels;
+      case ButtonLayout.xbox:
+        return xboxFaceLabels;
+      case ButtonLayout.playstation:
+        return psFaceLabels;
+    }
+    return xboxFaceLabels;
+  }
+
+  static String labelFor(String id) {
+    switch (id) {
+      case 'lt':
+        return 'LT / L2';
+      case 'lb':
+        return 'LB / L1';
+      case 'dpad':
+        return 'D-pad';
+      case 'disconnect':
+        return 'Disconnect';
+      case 'settings':
+        return 'Pengaturan (Gear)';
+      case 'saveLayout':
+        return 'Simpan Layout';
+      case 'resetLayout':
+        return 'Reset Layout';
+      case 'addMacro':
+        return 'Tambah Macro';
+      case 'menu':
+        return 'Menu / Share';
+      case 'guide':
+        return 'Guide';
+      case 'start':
+        return 'Start / Options';
+      case 'l3':
+        return 'L3 (Left Stick Click)';
+      case 'r3':
+        return 'R3 (Right Stick Click)';
+      case 'leftStick':
+        return 'Joystick Kiri';
+      case 'rightStick':
+        return 'Joystick Kanan';
+      case 'rb':
+        return 'RB / R1';
+      case 'rt':
+        return 'RT / R2';
+      case 'faceButtons':
+        return 'Tombol Aksi';
+      default:
+        return id;
+    }
   }
 }
 
@@ -118,8 +244,9 @@ class DefaultButtonConfigs {
 /// gagal diinisialisasi), objek ini otomatis jatuh ke penyimpanan in-memory
 /// supaya fitur pengaturan tetap bisa dipakai albeit tidak persisten.
 class GamepadSettings {
-  static const String _prefsKey = 'gamepad_button_configs';
-  static const String _sizeMultiplierKey = 'gamepad_size_multiplier';
+  static const String _legacyPrefsKey = 'gamepad_button_configs';
+  static const String _legacyMultiplierKey = 'gamepad_size_multiplier';
+  static const String _layoutKey = 'gamepad_selected_layout';
 
   final SharedPreferences? _prefs;
   final Map<String, dynamic> _memory = <String, dynamic>{};
@@ -140,6 +267,8 @@ class GamepadSettings {
       return GamepadSettings._internal(null);
     }
   }
+
+  String _keyFor(ButtonLayout layout) => 'gamepad_button_configs_${layout.key}';
 
   String? _getString(String key) => _prefs?.getString(key) ?? _memory[key] as String?;
 
@@ -164,12 +293,27 @@ class GamepadSettings {
   /// True bila pengaturan tersimpan permanen (bukan fallback in-memory).
   bool get isPersistent => _prefs != null;
 
-  /// Load semua config dari prefs, kalau belum ada pakai default.
-  Map<String, ButtonConfig> loadConfigs() {
-    final jsonStr = _getString(_prefsKey);
-    if (jsonStr == null) {
-      return _buildFromDefaults();
+  /// Akses mentah SharedPreferences, dipakai MacroManager agar memakai
+  /// koneksi storage yang sama. Null saat memakai fallback in-memory.
+  SharedPreferences? get prefs => _prefs;
+
+  /// Layout yang terakhir dipilih pengguna.
+  ButtonLayout loadLayout() => ButtonLayout.fromKey(_getString(_layoutKey));
+
+  void saveLayout(ButtonLayout layout) => _setString(_layoutKey, layout.key);
+
+  /// Load config untuk sebuah layout, fallback ke default bila belum pernah
+  /// disimpan atau datanya rusak.
+  Map<String, ButtonConfig> loadConfigs(ButtonLayout layout) {
+    var jsonStr = _getString(_keyFor(layout));
+
+    // Migrasi: layout Classic pernah disimpan tanpa suffix layout.
+    if (jsonStr == null && layout == ButtonLayout.classic) {
+      jsonStr = _getString(_legacyPrefsKey);
     }
+
+    final defaults = DefaultButtonConfigs.defaultConfigs(layout);
+    if (jsonStr == null) return defaults;
 
     try {
       final List<dynamic> list = jsonDecode(jsonStr) as List<dynamic>;
@@ -179,42 +323,29 @@ class GamepadSettings {
         configs[cfg.id] = cfg;
       }
       // Pastikan semua default ada (jika ada tombol baru di update versi depan)
-      final defaults = _buildFromDefaults();
       for (final entry in defaults.entries) {
-        if (!configs.containsKey(entry.key)) {
-          configs[entry.key] = entry.value;
-        }
+        configs.putIfAbsent(entry.key, () => entry.value);
       }
       return configs;
     } catch (_) {
-      return _buildFromDefaults();
+      return defaults;
     }
   }
 
-  /// Simpan semua config ke prefs.
-  void saveConfigs(Map<String, ButtonConfig> configs) {
+  /// Simpan config untuk sebuah layout.
+  void saveConfigs(ButtonLayout layout, Map<String, ButtonConfig> configs) {
     final list = configs.values.map((c) => c.toJson()).toList();
-    _setString(_prefsKey, jsonEncode(list));
+    _setString(_keyFor(layout), jsonEncode(list));
+    // Simpan juga ke key lama supaya tetap kompatibel bila user-nya Classic.
+    if (layout == ButtonLayout.classic) {
+      _setString(_legacyPrefsKey, jsonEncode(list));
+      _setDouble(_legacyMultiplierKey, 1.0);
+    }
   }
 
   /// Load size multiplier (1.0 = default).
-  double loadSizeMultiplier() {
-    return _getDouble(_sizeMultiplierKey) ?? 1.0;
-  }
+  double loadSizeMultiplier() => _getDouble(_legacyMultiplierKey) ?? 1.0;
 
   /// Simpan size multiplier.
-  void saveSizeMultiplier(double value) {
-    _setDouble(_sizeMultiplierKey, value);
-  }
-
-  /// Config default tanpa menyentuh SharedPreferences. Dipakai sebagai
-  /// fallback supaya UI tetap menampilkan tombol walau prefs gagal dimuat.
-  static Map<String, ButtonConfig> defaultConfigs() => DefaultButtonConfigs.defaultConfigs();
-
-  Map<String, ButtonConfig> _buildFromDefaults() => DefaultButtonConfigs.defaultConfigs();
-
-  /// Reset semua config ke default.
-  Map<String, ButtonConfig> resetToDefaults() {
-    return _buildFromDefaults();
-  }
+  void saveSizeMultiplier(double value) => _setDouble(_legacyMultiplierKey, value);
 }

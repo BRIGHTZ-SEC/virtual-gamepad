@@ -4,10 +4,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/gestures.dart';
 import 'package:url_launcher/url_launcher.dart';
+import '../models/gamepad_settings.dart';
 import '../network/gamepad_socket.dart';
 import '../network/protocol.dart';
 import '../theme.dart';
 import 'gamepad_screen.dart';
+import 'layout_selection_screen.dart';
 
 class ConnectScreen extends StatefulWidget {
   const ConnectScreen({super.key});
@@ -64,24 +66,54 @@ class _ConnectScreenState extends State<ConnectScreen> {
     if (!mounted) return;
     if (status == ConnectionStatus.connected) {
       setState(() => _connecting = false);
-      Navigator.of(context)
-          .push(MaterialPageRoute(
-        builder: (_) => GamepadScreen(socket: _socket),
-      ))
-          .then((_) {
-        setState(() => _error = null);
-        _found.clear();
-        SystemChrome.setPreferredOrientations([
-          DeviceOrientation.portraitUp,
-        ]);
-        _startDiscovery();
-      });
+      _openLayoutSelection();
     } else if (status == ConnectionStatus.error) {
       setState(() {
         _connecting = false;
         _error = 'PC rejected the connection. Is ViGEmBus installed there?';
       });
     }
+  }
+
+  /// Setelah koneksi berhasil, tampilkan layar pilihan layout (Xbox / PS /
+  /// Classic) sebelum masuk ke gamepad. Layar ini tidak bisa ditutup dengan
+  /// tombol back, jadi pengguna selalu memilih salah satu layout.
+  Future<void> _openLayoutSelection() async {
+    if (!mounted) return;
+    final settings = await GamepadSettings.create();
+    if (!mounted) return;
+
+    final chosen = await Navigator.of(context).push<ButtonLayout>(
+      MaterialPageRoute(
+        builder: (_) => LayoutSelectionScreen(
+          settings: settings,
+          onSelected: (layout) => Navigator.of(context).pop(layout),
+        ),
+      ),
+    );
+
+    // Guard: bila layar ditutup tanpa memilih (mis. context sudah tidak
+    // valid), jangan coba lanjut ke gamepad.
+    if (!mounted || chosen == null) return;
+
+    await Navigator.of(context)
+        .push(
+      MaterialPageRoute(
+        builder: (_) => GamepadScreen(
+          socket: _socket,
+          settings: settings,
+          layout: chosen,
+        ),
+      ),
+    );
+
+    if (!mounted) return;
+    setState(() => _error = null);
+    _found.clear();
+    SystemChrome.setPreferredOrientations([
+      DeviceOrientation.portraitUp,
+    ]);
+    _startDiscovery();
   }
 
   Future<void> _connectTo(String ip) async {

@@ -5,6 +5,7 @@ import 'package:wakelock_plus/wakelock_plus.dart';
 
 import '../models/gamepad_settings.dart';
 import '../models/gamepad_state.dart';
+import '../models/macro.dart';
 import '../network/gamepad_socket.dart';
 import '../network/protocol.dart';
 import '../theme.dart';
@@ -15,7 +16,21 @@ import '../widgets/trigger_widget.dart';
 
 class GamepadScreen extends StatefulWidget {
   final GamepadSocket socket;
-  const GamepadScreen({super.key, required this.socket});
+
+  /// Instance penyimpanan yang sudah dibuat oleh ConnectScreen. Kalau null,
+  /// layar akan membuat sendiri lewat fallback in-memory.
+  final GamepadSettings? settings;
+
+  /// Layout yang dipilih pengguna di layar pemilihan layout. Null berarti
+  /// pakai layout yang tersimpan terakhir.
+  final ButtonLayout? layout;
+
+  const GamepadScreen({
+    super.key,
+    required this.socket,
+    this.settings,
+    this.layout,
+  });
 
   @override
   State<GamepadScreen> createState() => _GamepadScreenState();
@@ -24,16 +39,39 @@ class GamepadScreen extends StatefulWidget {
 class _GamepadScreenState extends State<GamepadScreen> {
   late final GamepadState _state;
   StreamSubscription? _connectionSubscription; // Handles the socket listener state
+
+  // Layout aktif. Di-resolve di initState dari argumen, lalu dari storage.
+  late ButtonLayout _layout;
+
   // Selalu non-null: mulai dari instance in-memory supaya ikon pengaturan
   // selalu bisa dibuka, walau SharedPreferences gagal dimuat belakangan.
   GamepadSettings _settings = GamepadSettings.fallback();
   // Mulai dari default sinkron supaya tombol langsung tampil walau
   // SharedPreferences belum selesai dimuat atau gagal dimuat.
-  Map<String, ButtonConfig> _configs = DefaultButtonConfigs.defaultConfigs();
+  Map<String, ButtonConfig> _configs =
+      DefaultButtonConfigs.defaultConfigs(ButtonLayout.xbox);
   bool _editMode = false;
 
   // State gesture untuk mode edit: ukuran awal saat pinch dimulai.
   final Map<String, (double, double)> _gestureStartSizes = {};
+
+  // ---------------- Macro ----------------
+  // Tidak ada tombol macro secara default; muncul setelah user membuatnya
+  // lewat ikon "Tambah Macro" di mode edit.
+  final Map<String, ButtonConfig> _macroConfigs = {};
+  MacroManager? _macros;
+  List<Macro> _macroList = [];
+
+  bool _recording = false;
+  final List<MacroEvent> _recorded = [];
+  Stopwatch? _recordClock;
+
+  final List<Timer> _playbackTimers = [];
+  bool _playingBack = false;
+
+  /// Bit yang sedang ditahan saat playback, agar bisa dilepas dengan aman
+  /// ketika playback dihentikan di tengah jalan.
+  final Set<int> _playbackHeld = {};
 
   /// Rasio ukuran tombol saat ini dibanding ukuran default-nya (1.0 = default).
   /// Dipakai agar isi tombol (bukan cuma kotak luarnya) ikut membesar/perkecil
@@ -41,7 +79,7 @@ class _GamepadScreenState extends State<GamepadScreen> {
   double _scaleOf(String id) {
     final cfg = _configs[id];
     if (cfg == null) return 1.0;
-    final def = DefaultButtonConfigs.defaultConfigs()[id];
+    final def = DefaultButtonConfigs.defaultConfigs(_layout)[id];
     if (def == null || def.width <= 0) return 1.0;
     return cfg.width / def.width;
   }
@@ -75,9 +113,24 @@ class _GamepadScreenState extends State<GamepadScreen> {
       DeviceOrientation.landscapeRight,
     ]);
 
-    // Load pengaturan tombol dari SharedPreferences. Kegagalan di sini
-    // tidak boleh membuat layar kosong, jadi default sudah terpasang di atas.
-    _loadSettings();
+    // Resolve layout: pakai argumen, kalau tidak ambil dari storage.
+    _layout = widget.layout ??
+        widget.settings?.loadLayout() ??
+        ButtonLayout.xbox;
+
+    // Pakai instance settings dari ConnectScreen bila tersedia, supaya
+    // perubahan layout langsung konsisten tanpa membaca storage dua kali.
+    if (widget.settings != null) {
+      _settings = widget.settings!;
+    }
+
+    // Muat config tombol untuk layout aktif.
+    _configs = DefaultButtonConfigs.defaultConfigs(_layout);
+    if (widget.settings != null) {
+      _configs = _settings.loadConfigs(_layout);
+    } else {
+      _loadSettings();
+    }
 
     // Listen for disconnections automatically from the socket network manager
     _connectionSubscription = widget.socket.connectionStream.listen((isConnected) {
@@ -85,13 +138,16 @@ class _GamepadScreenState extends State<GamepadScreen> {
         _handleConnectionLoss();
       }
     });
+
+    // Muat macro yang tersimpan (tidak ada tombol macro secara default).
+    _loadMacros();
   }
 
   Future<void> _loadSettings() async {
     try {
       final settings = await GamepadSettings.create();
       if (!mounted) return;
-      final loaded = settings.loadConfigs();
+      final loaded = settings.loadConfigs(_layout);
       setState(() {
         _settings = settings;
         _configs = loaded;
@@ -121,7 +177,7 @@ class _GamepadScreenState extends State<GamepadScreen> {
   /// Simpan layout saat ini ke penyimpanan.
   void _saveLayout() {
     try {
-      _settings.saveConfigs(_configs);
+      _settings.saveConfigs(_layout, _configs);
       _settings.saveSizeMultiplier(1.0);
     } catch (e) {
       debugPrint('Gagal menyimpan layout: $e');
@@ -132,7 +188,16 @@ class _GamepadScreenState extends State<GamepadScreen> {
   /// Reset semua tombol ke posisi & ukuran default.
   void _resetLayout() {
     HapticFeedback.heavyImpact();
-    setState(() => _configs = DefaultButtonConfigs.defaultConfigs());
+    _stopPlayback();
+    if (_recording) {
+      _recording = false;
+      _recorded.clear();
+    }
+    setState(() {
+      _configs = DefaultButtonConfigs.defaultConfigs(_layout);
+      // Tombol macro ikut dikembalikan ke posisi default.
+      _macroConfigs.remove('macro0');
+    });
     _saveLayout();
   }
 
@@ -147,8 +212,205 @@ class _GamepadScreenState extends State<GamepadScreen> {
     );
   }
 
+  // ------------------------- Macro -------------------------
+
+  /// Muat daftar macro yang tersimpan.
+  Future<void> _loadMacros() async {
+    try {
+      MacroManager.usePrefs(_settings.prefs);
+      final mgr = await MacroManager.create();
+      if (!mounted) return;
+      setState(() {
+        _macros = mgr;
+        _macroList = mgr.loadMacros();
+      });
+    } catch (e) {
+      debugPrint('Gagal memuat macro: $e');
+    }
+  }
+
+  /// Tambah satu tombol macro baru di area tengah bawah layar.
+  void _addMacro() {
+    if (_macroConfigs.isNotEmpty) {
+      _banner('Tombol macro sudah ada. Reset dulu sebelum menambah.',
+          Colors.orange);
+      return;
+    }
+
+    // Placeholder 'macro0' dibuat dulu supaya user bisa menaruhnya di posisi
+    // yang diinginkan lewat mode edit. Nama asli diminta setelah rekaman.
+    setState(() {
+      _macroConfigs['macro0'] = ButtonConfig(
+        id: 'macro0',
+        xFrac: 0.470,
+        yFrac: 0.470,
+        width: 104,
+        height: 46,
+      );
+    });
+    _banner('Tombol macro ditambahkan. Geser posisinya, lalu tekan untuk merekam.',
+        AppColors.buttonA);
+  }
+
+  /// Dialog sederhana untuk memberi nama macro.
+  Future<String?> _showMacroNameDialog() async {
+    final controller = TextEditingController(text: 'Macro 1');
+    final result = await showDialog<String>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: AppColors.gamepadTop,
+        title: const Text('Nama Macro', style: TextStyle(color: Colors.white)),
+        content: TextField(
+          controller: controller,
+          autofocus: true,
+          style: const TextStyle(color: Colors.white),
+          decoration: InputDecoration(
+            hintText: 'Contoh: Kombo Burst',
+            hintStyle: TextStyle(color: Colors.white.withOpacity(0.5)),
+            enabledBorder: const UnderlineInputBorder(
+              borderSide: BorderSide(color: Colors.white24),
+            ),
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(),
+            child: const Text('Batal', style: TextStyle(color: Colors.white60)),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(controller.text.trim()),
+            child: const Text('Simpan', style: TextStyle(color: AppColors.accentLight)),
+          ),
+        ],
+      ),
+    );
+    controller.dispose();
+    if (result == null || result.isEmpty) return null;
+    return result;
+  }
+
+  /// Mulai rekaman. Semua tombol yang bisa direkam akan mencatat kejadiannya.
+  void _startRecording() {
+    if (_recording) return;
+    setState(() {
+      _recording = true;
+      _recorded.clear();
+    });
+    _recordClock = Stopwatch()..start();
+    _banner('Merekam... tekan tombol yang ingin dimasukkan.', AppColors.buttonB);
+  }
+
+  /// Hentikan rekaman dan simpan sebagai macro baru.
+  Future<void> _stopRecording() async {
+    if (!_recording) return;
+    _recordClock?.stop();
+
+    final events = List<MacroEvent>.from(_recorded);
+    setState(() => _recording = false);
+
+    if (events.isEmpty) {
+      _recorded.clear();
+      _banner('Rekaman kosong, tidak disimpan.', Colors.orange);
+      return;
+    }
+
+    final name = await _showMacroNameDialog();
+    if (name == null || !mounted) {
+      _recorded.clear();
+      return;
+    }
+
+    final mgr = _macros;
+    if (mgr == null) {
+      _banner('Macro belum siap, coba lagi.', Colors.orange);
+      return;
+    }
+
+    final id = 'macro${DateTime.now().millisecondsSinceEpoch}';
+    final macro = Macro(id: id, name: name, events: events);
+
+    // Ganti id tombol yang di layar agar tidak bentrok dengan macro lama.
+    final newConfigs = <String, ButtonConfig>{
+      for (final e in _macroConfigs.entries)
+        if (e.key != 'macro0') e.key: e.value,
+    };
+    newConfigs[id] = ButtonConfig(
+      id: id,
+      xFrac: _macroConfigs['macro0']?.xFrac ?? 0.5,
+      yFrac: _macroConfigs['macro0']?.yFrac ?? 0.47,
+      width: _macroConfigs['macro0']?.width ?? 104,
+      height: _macroConfigs['macro0']?.height ?? 46,
+    );
+
+    final updated = [..._macroList, macro];
+    await mgr.saveMacros(updated);
+    if (!mounted) return;
+    setState(() {
+      _macroList = updated;
+      _macroConfigs = newConfigs;
+      _recorded.clear();
+    });
+    _banner('Macro "$name" tersimpan (${events.length} kejadian).', AppColors.buttonA);
+  }
+
+  /// Putar ulang sebuah macro dengan menjaga urutan waktu kejadian.
+  void _playMacro(Macro macro) {
+    if (_playingBack || macro.events.isEmpty) return;
+    _stopPlayback();
+
+    setState(() => _playingBack = true);
+    HapticFeedback.mediumImpact();
+
+    for (final event in macro.events) {
+      final delay = Duration(milliseconds: event.timeMs);
+      // Setiap kejadian memakai timer sendiri; satu variabel timer tunggal
+      // akan saling menimpa dan hanya kejadian terakhir yang berjalan.
+      _playbackTimers.add(
+        Timer(delay, () {
+          if (!mounted) return;
+          if (event.pressed) {
+            _playbackHeld.add(event.bit);
+          } else {
+            _playbackHeld.remove(event.bit);
+          }
+          _state.setButton(event.bit, event.pressed);
+        }),
+      );
+    }
+
+    // Pastikan semua tombol yang masih tertahan dilepas setelah selesai.
+    _playbackTimers.add(
+      Timer(
+        Duration(milliseconds: macro.durationMs + 120),
+        () => _stopPlayback(),
+      ),
+    );
+  }
+
+  /// Hentikan playback dan lepaskan semua tombol yang masih tertahan,
+  /// supaya tidak ada tombol yang "nyangkut" tertekan.
+  void _stopPlayback() {
+    for (final t in _playbackTimers) {
+      t.cancel();
+    }
+    _playbackTimers.clear();
+    if (_playbackHeld.isNotEmpty) {
+      for (final bit in _playbackHeld) {
+        _state.setButton(bit, false);
+      }
+      _playbackHeld.clear();
+    }
+    if (_playingBack && mounted) {
+      setState(() => _playingBack = false);
+    } else {
+      _playingBack = false;
+    }
+  }
+
   @override
   void dispose() {
+    _stopPlayback();
+    _recordClock?.stop();
     _connectionSubscription?.cancel(); // Cancel network listeners to prevent memory leaks
     _state.stop();
     WakelockPlus.disable();
@@ -190,6 +452,19 @@ class _GamepadScreenState extends State<GamepadScreen> {
   void _handleButtonPress(int buttonBit, bool isPressed) {
     if (isPressed) {
       HapticFeedback.lightImpact();
+    }
+    // Rekam kejadian ini bila sedang merekam macro dan tombolnya masuk daftar.
+    if (_recording && MacroManager.recordableBits.contains(buttonBit)) {
+      final elapsed = _recordClock?.elapsedMilliseconds ?? 0;
+      _recorded.add(MacroEvent(
+        bit: buttonBit,
+        pressed: isPressed,
+        timeMs: elapsed,
+      ));
+      // Batasi durasi rekaman supaya tidak berjalan tanpa henti.
+      if (elapsed >= MacroManager.maxLength.inMilliseconds) {
+        _stopRecording();
+      }
     }
     _state.setButton(buttonBit, isPressed);
   }
@@ -237,15 +512,109 @@ class _GamepadScreenState extends State<GamepadScreen> {
     }
   }
 
-  /// Buat widget berposisi berdasarkan config tombol. Saat _editMode aktif,
-  /// tombol bisa di-drag untuk mengganti posisinya secara visual.
+  /// Membangun daftar widget untuk setiap tombol macro yang sudah dibuat user.
+  ///
+  /// Macro tidak punya entry di [_configs] (yang hanya berisi tombol gamepad),
+  /// jadi posisinya diambil dari [_macroConfigs] dan ikut bisa digeser serta
+  /// diperbesar saat mode edit aktif.
+  List<Widget> _buildMacroButtons(BoxConstraints c) {
+    final widgets = <Widget>[];
+
+    for (final entry in _macroConfigs.entries) {
+      final id = entry.key;
+      final cfg = entry.value;
+
+      Macro? found;
+      for (final m in _macroList) {
+        if (m.id == id) {
+          found = m;
+          break;
+        }
+      }
+      final Macro? macro = found;
+
+      final isPlaceholder = macro == null;
+      final label = isPlaceholder ? 'MACRO' : macro!.name;
+
+      final w = cfg.width;
+      final h = cfg.height;
+      final left = c.maxWidth * cfg.xFrac - w / 2;
+      final top = c.maxHeight * cfg.yFrac - h / 2;
+
+      Widget button = GamepadButtonWidget(
+        label: label,
+        size: h,
+        fontSize: 13,
+        color: _recording ? AppColors.buttonB : AppColors.iconBg,
+        onChanged: (pressed) {
+          if (!pressed) return;
+          if (_recording) {
+            // Ketuk lagi untuk berhenti dan menyimpan rekaman.
+            _stopRecording();
+          } else if (macro == null) {
+            _startRecording();
+          } else {
+            _playMacro(macro);
+          }
+        },
+      );
+
+      if (_editMode) {
+        final startW = _gestureStartSizes[id]?.$1 ?? w;
+        final startH = _gestureStartSizes[id]?.$2 ?? h;
+
+        button = GestureDetector(
+          behavior: HitTestBehavior.opaque,
+          onScaleStart: (_) {
+            final cur = _macroConfigs[id];
+            if (cur == null) return;
+            _gestureStartSizes[id] = (cur.width, cur.height);
+            HapticFeedback.selectionClick();
+          },
+          onScaleUpdate: (d) {
+            final cur = _macroConfigs[id];
+            if (cur == null) return;
+            setState(() {
+              if (d.pointerCount >= 2) {
+                final nw = (startW * d.scale).clamp(60.0, 300.0);
+                final nh = (startH * d.scale).clamp(36.0, 200.0);
+                _macroConfigs[id] = cur.copyWith(width: nw, height: nh);
+              } else {
+                _macroConfigs[id] = cur.copyWith(
+                  xFrac: (cur.xFrac + d.focalPointDelta.dx / c.maxWidth)
+                      .clamp(0.0, 1.0),
+                  yFrac: (cur.yFrac + d.focalPointDelta.dy / c.maxHeight)
+                      .clamp(0.0, 1.0),
+                );
+              }
+            });
+          },
+          onScaleEnd: (_) => _gestureStartSizes.remove(id),
+          child: button,
+        );
+      }
+
+      widgets.add(
+        Positioned(
+          left: left,
+          top: top,
+          width: w,
+          height: h,
+          child: Center(child: button),
+        ),
+      );
+    }
+
+    return widgets;
+  }
+
   /// Membangun widget tombol pada posisi dari config.
   ///
   /// Saat [_editMode] aktif, tombol bisa digeser satu jari dan diubah
   /// ukurannya dengan cubitan dua jari. Editan hanya berlaku di config
   /// in-memory dan disimpan ke [_saveLayout] saat mode edit dimatikan.
   Widget _atc(BoxConstraints c, String id, Widget child, {double? wOverride, double? hOverride}) {
-    final cfg = _configs[id] ?? DefaultButtonConfigs.defaultConfigs()[id];
+    final cfg = _configs[id] ?? DefaultButtonConfigs.defaultConfigs(_layout)[id];
     if (cfg == null) {
       debugPrint('Unknown button id: $id');
       return const SizedBox.shrink();
@@ -372,7 +741,7 @@ class _GamepadScreenState extends State<GamepadScreen> {
                   // LT - Left Trigger
                   _atc(c, 'lt',
                       TriggerWidget(
-                        label: 'LT',
+                        label: _layout == ButtonLayout.playstation ? 'L2' : 'LT',
                         size: _innerSize('lt', 112), 
                         onChanged: (v) {
                           _handleTriggerHaptic(v, true);
@@ -383,7 +752,7 @@ class _GamepadScreenState extends State<GamepadScreen> {
                   // LB - Left Bumper
                   _atc(c, 'lb',
                       GamepadButtonWidget(
-                        label: 'LB',
+                        label: _layout == ButtonLayout.playstation ? 'L1' : 'LB',
                         size: _innerSize('lb', 70),
                         color: AppColors.stickFill,
                         onChanged: (p) => _handleButtonPress(Protocol.bitLb, p),
@@ -481,6 +850,27 @@ class _GamepadScreenState extends State<GamepadScreen> {
                           ),
                         )),
 
+                  // Add Macro button - only while editing
+                  if (_editMode)
+                    _atc(c, 'addMacro',
+                        GestureDetector(
+                          onTap: _addMacro,
+                          child: Container(
+                            width: _innerSize('addMacro', 44),
+                            height: _innerSize('addMacro', 44),
+                            alignment: Alignment.center,
+                            decoration: const BoxDecoration(
+                              color: AppColors.accentLight,
+                              shape: BoxShape.circle,
+                            ),
+                            child: const Icon(Icons.add,
+                                color: Colors.black, size: 24),
+                          ),
+                        )),
+
+                  // Macro buttons - created by the user, not present by default
+                  ..._buildMacroButtons(c),
+
                   // Menu / Guide / Start Row
                   _atc(c, 'menu',
                       GamepadButtonWidget(
@@ -508,27 +898,38 @@ class _GamepadScreenState extends State<GamepadScreen> {
                       )),
 
                   // L3 / R3 Stick Clicks
-                  _atc(c, 'l3',
-                      GamepadButtonWidget(
-                        label: 'LEFT',
-                        pill: true,
-                        size: _innerSize('l3', 40),
-                        color: AppColors.stickFill,
-                        onChanged: (p) => _handleButtonPress(Protocol.bitLsClick, p),
-                      )),
-                  _atc(c, 'r3',
-                      GamepadButtonWidget(
-                        label: 'RIGHT',
-                        pill: true,
-                        size: _innerSize('r3', 40),
-                        color: AppColors.stickFill,
-                        onChanged: (p) => _handleButtonPress(Protocol.bitRsClick, p),
-                      )),
+                  // Hanya digambar pada layout Classic. Pada layout Xbox dan
+                  // PlayStation, L3/R3 adalah tombol tekan pada analog stick
+                  // itu sendiri, sehinggahandled olehJoystickWidget di bawah.
+                  if (_layout == ButtonLayout.classic) ...[
+                    _atc(c, 'l3',
+                        GamepadButtonWidget(
+                          label: 'LEFT',
+                          pill: true,
+                          size: _innerSize('l3', 40),
+                          color: AppColors.stickFill,
+                          onChanged: (p) =>
+                              _handleButtonPress(Protocol.bitLsClick, p),
+                        )),
+                    _atc(c, 'r3',
+                        GamepadButtonWidget(
+                          label: 'RIGHT',
+                          pill: true,
+                          size: _innerSize('r3', 40),
+                          color: AppColors.stickFill,
+                          onChanged: (p) =>
+                              _handleButtonPress(Protocol.bitRsClick, p),
+                        )),
+                  ],
 
                   // Left stick
                   _atc(c, 'leftStick',
                       JoystickWidget(
                         size: _innerSize('leftStick', 160),
+                        onClick: _layout == ButtonLayout.classic
+                            ? null
+                            : (pressed) =>
+                                _handleButtonPress(Protocol.bitLsClick, pressed),
                         onChanged: (x, y) {
                           _handleJoystickHaptic(x, y, true);
                           _state.setLeftStick(x, y);
@@ -539,6 +940,10 @@ class _GamepadScreenState extends State<GamepadScreen> {
                   _atc(c, 'rightStick',
                       JoystickWidget(
                         size: _innerSize('rightStick', 160),
+                        onClick: _layout == ButtonLayout.classic
+                            ? null
+                            : (pressed) =>
+                                _handleButtonPress(Protocol.bitRsClick, pressed),
                         onChanged: (x, y) {
                           _handleJoystickHaptic(x, y, false);
                           _state.setRightStick(x, y);
@@ -548,7 +953,7 @@ class _GamepadScreenState extends State<GamepadScreen> {
                   // RB - Upper Right
                   _atc(c, 'rb',
                       GamepadButtonWidget(
-                        label: 'RB',
+                        label: _layout == ButtonLayout.playstation ? 'R1' : 'RB',
                         size: _innerSize('rb', 70),
                         color: AppColors.stickFill,
                         onChanged: (p) => _handleButtonPress(Protocol.bitRb, p),
@@ -557,7 +962,7 @@ class _GamepadScreenState extends State<GamepadScreen> {
                   // RT - Right Trigger
                   _atc(c, 'rt',
                       TriggerWidget(
-                        label: 'RT',
+                        label: _layout == ButtonLayout.playstation ? 'R2' : 'RT',
                         size: _innerSize('rt', 112),
                         onChanged: (v) {
                           _handleTriggerHaptic(v, false);
@@ -570,6 +975,7 @@ class _GamepadScreenState extends State<GamepadScreen> {
                       _FaceButtons(
                         onButtonPressed: _handleButtonPress,
                         size: _innerSize('faceButtons', 150),
+                        layout: _layout,
                         buttonSize: _innerSize('faceButtons', 56))),
                 ],
               );
@@ -581,15 +987,26 @@ class _GamepadScreenState extends State<GamepadScreen> {
   }
 }
 
+/// Empat tombol aksi (atas/bawah/kiri/kanan).
+///
+/// Pemetaan ke protocol bit selalu mengikuti Xbox (Y/A/X/B) supaya game di PC
+/// tidak perlu tahu layout mana yang dipakai. Yang berubah hanya tampilan:
+/// pada layout PlayStation simbol segitiga/bulat/kotak/silang dipakai, pada
+/// layout Xbox/Classic memakai huruf A/B/X/Y berwarna.
 class _FaceButtons extends StatelessWidget {
   final void Function(int buttonBit, bool isPressed) onButtonPressed;
   final double size;
   final double buttonSize;
+  final ButtonLayout layout;
+
   const _FaceButtons({
     required this.onButtonPressed,
     required this.size,
+    required this.layout,
     this.buttonSize = 56,
   });
+
+  bool get _isPs => layout == ButtonLayout.playstation;
 
   @override
   Widget build(BuildContext context) {
@@ -597,46 +1014,148 @@ class _FaceButtons extends StatelessWidget {
       width: size,
       height: size,
       child: Stack(
+        clipBehavior: Clip.none,
         alignment: Alignment.center,
         children: [
+          // Atas: Xbox Y / PS Triangle
           Positioned(
             top: 0,
-            child: GamepadButtonWidget(
-              label: 'Y',
-              size: buttonSize,
+            child: _face(
+              bit: Protocol.bitY,
               color: AppColors.buttonY,
-              onChanged: (p) => onButtonPressed(Protocol.bitY, p),
+              psGlyph: _PsGlyph.triangle,
             ),
           ),
+          // Bawah: Xbox A / PS Cross
           Positioned(
             bottom: 0,
-            child: GamepadButtonWidget(
-              label: 'A',
-              size: buttonSize,
+            child: _face(
+              bit: Protocol.bitA,
               color: AppColors.buttonA,
-              onChanged: (p) => onButtonPressed(Protocol.bitA, p),
+              psGlyph: _PsGlyph.cross,
             ),
           ),
+          // Kiri: Xbox X / PS Square
           Positioned(
             left: 0,
-            child: GamepadButtonWidget(
-              label: 'X',
-              size: buttonSize,
+            child: _face(
+              bit: Protocol.bitX,
               color: AppColors.buttonX,
-              onChanged: (p) => onButtonPressed(Protocol.bitX, p),
+              psGlyph: _PsGlyph.square,
             ),
           ),
+          // Kanan: Xbox B / PS Circle
           Positioned(
             right: 0,
-            child: GamepadButtonWidget(
-              label: 'B',
-              size: buttonSize,
+            child: _face(
+              bit: Protocol.bitB,
               color: AppColors.buttonB,
-              onChanged: (p) => onButtonPressed(Protocol.bitB, p),
+              psGlyph: _PsGlyph.circle,
             ),
           ),
         ],
       ),
     );
   }
+
+  Widget _face({
+    required int bit,
+    required Color color,
+    required _PsGlyph psGlyph,
+  }) {
+    if (_isPs) {
+      // Tombol PlayStation: bodies gelap dengan simbol berwarna dan border.
+      return GamepadButtonWidget(
+        label: '',
+        size: buttonSize,
+        solid: false,
+        color: color,
+        borderWidth: 2.5,
+        borderColor: color,
+        onChanged: (p) => onButtonPressed(bit, p),
+        child: CustomPaint(
+          size: Size.square(buttonSize * 0.52),
+          painter: _PsGlyphPainter(psGlyph, color),
+        ),
+      );
+    }
+
+    // Xbox / Classic: huruf penuh warna.
+    final labels = DefaultButtonConfigs.faceLabels(layout);
+    String text;
+    if (bit == Protocol.bitY) {
+      text = labels[0];
+    } else if (bit == Protocol.bitB) {
+      text = labels[1];
+    } else if (bit == Protocol.bitX) {
+      text = labels[2];
+    } else {
+      text = labels[3];
+    }
+
+    return GamepadButtonWidget(
+      label: text,
+      size: buttonSize,
+      color: color,
+      onChanged: (p) => onButtonPressed(bit, p),
+    );
+  }
+}
+
+/// Bentuk simbol khas PlayStation.
+enum _PsGlyph { triangle, circle, square, cross }
+
+/// Menggambar simbol PlayStation dengan stroke, supaya tetap tajam di
+/// semua ukuran dan tidak bergantung pada aset gambar eksternal.
+class _PsGlyphPainter extends CustomPainter {
+  final _PsGlyph glyph;
+  final Color color;
+
+  _PsGlyphPainter(this.glyph, this.color);
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final stroke = Paint()
+      ..color = color
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = size.width * 0.14
+      ..strokeJoin = StrokeJoin.round
+      ..strokeCap = StrokeCap.round;
+
+    final w = size.width;
+    final h = size.height;
+    final path = Path();
+
+    switch (glyph) {
+      case _PsGlyph.triangle:
+        path.moveTo(w / 2, h * 0.10);
+        path.lineTo(w * 0.94, h * 0.88);
+        path.lineTo(w * 0.06, h * 0.88);
+        path.close();
+        canvas.drawPath(path, stroke);
+
+      case _PsGlyph.circle:
+        canvas.drawCircle(Offset(w / 2, h / 2), w * 0.38, stroke);
+
+      case _PsGlyph.square:
+        canvas.drawRRect(
+          RRect.fromRectAndRadius(
+            Rect.fromLTWH(w * 0.14, h * 0.14, w * 0.72, h * 0.72),
+            Radius.circular(w * 0.10),
+          ),
+          stroke,
+        );
+
+      case _PsGlyph.cross:
+        path.moveTo(w * 0.12, h * 0.12);
+        path.lineTo(w * 0.88, h * 0.88);
+        path.moveTo(w * 0.88, h * 0.12);
+        path.lineTo(w * 0.12, h * 0.88);
+        canvas.drawPath(path, stroke);
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _PsGlyphPainter oldDelegate) =>
+      oldDelegate.glyph != glyph || oldDelegate.color != color;
 }

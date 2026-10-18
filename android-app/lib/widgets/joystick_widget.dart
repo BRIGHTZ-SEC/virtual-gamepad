@@ -10,11 +10,16 @@ class JoystickWidget extends StatefulWidget {
   final void Function(double x, double y) onChanged;
   final String? label;
 
+  /// Callback saat stick ditekan sebagai tombol (L3 / R3 pada layout Xbox dan
+  /// PlayStation). Null berarti stick tidak bisa diklik.
+  final void Function(bool pressed)? onClick;
+
   const JoystickWidget({
     super.key,
     required this.onChanged,
     this.size = 140,
     this.label,
+    this.onClick,
   });
 
   @override
@@ -51,8 +56,17 @@ class _JoystickWidgetState extends State<JoystickWidget> {
         GestureDetector(
           onPanStart: (d) => _updateFromLocal(d.localPosition, radius),
           onPanUpdate: (d) => _updateFromLocal(d.localPosition, radius),
-          onPanEnd: (_) => _reset(),
-          onPanCancel: _reset,
+          onPanEnd: (_) {
+            _reset();
+            widget.onClick?.call(false);
+          },
+          onPanCancel: () {
+            _reset();
+            widget.onClick?.call(false);
+          },
+          onTapDown: widget.onClick == null ? null : (_) => widget.onClick!(true),
+          onTapUp: widget.onClick == null ? null : (_) => widget.onClick!(false),
+          onTapCancel: widget.onClick == null ? null : () => widget.onClick!(false),
           child: Container(
             width: widget.size,
             height: widget.size,
