@@ -26,13 +26,25 @@ class _SettingsScreenState extends State<SettingsScreen> {
   @override
   void initState() {
     super.initState();
-    _working = Map<String, ButtonConfig>.from(widget.configs);
-    _globalMultiplier = widget.settings.loadSizeMultiplier();
+    // Selalu mulai dari default lengkap, lalu overlay config yang tersimpan
+    // supaya tidak pernah ada tombol yang hilang dari daftar.
+    _working = DefaultButtonConfigs.defaultConfigs();
+    widget.configs.forEach((id, cfg) => _working[id] = cfg);
+    try {
+      _globalMultiplier = widget.settings.loadSizeMultiplier();
+    } catch (_) {
+      _globalMultiplier = 1.0;
+    }
   }
 
   void _updateSize(String id, double value) {
+    // Simpan nilai dasar (tanpa multiplier) supaya slider global dan slider
+    // per-tombol tidak saling menimpa.
     setState(() {
-      _working[id] = _working[id]!.copyWith(width: value, height: value);
+      final current = _working[id];
+      if (current == null) return;
+      final ratio = current.height == 0 ? 1.0 : value / current.width;
+      _working[id] = current.copyWith(width: value, height: value * ratio);
     });
   }
 
@@ -44,14 +56,19 @@ class _SettingsScreenState extends State<SettingsScreen> {
 
   void _resetDefaults() {
     setState(() {
-      _working = widget.settings.resetToDefaults();
+      _working = DefaultButtonConfigs.defaultConfigs();
       _globalMultiplier = 1.0;
     });
   }
 
   void _save() {
-    widget.settings.saveConfigs(_working);
-    widget.settings.saveSizeMultiplier(_globalMultiplier);
+    // Simpan ke storage bila bisa; kalau gagal, tetap terapkan ke sesi ini.
+    try {
+      widget.settings.saveConfigs(_working);
+      widget.settings.saveSizeMultiplier(_globalMultiplier);
+    } catch (e) {
+      debugPrint('Gagal menyimpan pengaturan: $e');
+    }
     widget.onSave(_working);
     Navigator.of(context).pop();
   }
@@ -253,7 +270,7 @@ class _ButtonSettingItemState extends State<_ButtonSettingItem> {
                   ),
                   const SizedBox(height: 8),
                   Slider(
-                    value: effWidth.clamp(30, 300),
+                    value: effWidth.clamp(30.0, 300.0),
                     min: 30,
                     max: 300,
                     divisions: 54,

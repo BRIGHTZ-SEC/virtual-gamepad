@@ -26,7 +26,9 @@ class _GamepadScreenState extends State<GamepadScreen> {
   late final GamepadState _state;
   StreamSubscription? _connectionSubscription; // Handles the socket listener state
   GamepadSettings? _settings;
-  Map<String, ButtonConfig> _configs = {};
+  // Mulai dari default sinkron supaya tombol langsung tampil walau
+  // SharedPreferences belum selesai dimuat atau gagal dimuat.
+  Map<String, ButtonConfig> _configs = DefaultButtonConfigs.defaultConfigs();
   bool _editMode = false;
 
   // Track D-pad states to only vibrate when a direction is freshly clicked down
@@ -55,14 +57,9 @@ class _GamepadScreenState extends State<GamepadScreen> {
       DeviceOrientation.landscapeRight,
     ]);
 
-    // Load pengaturan tombol dari SharedPreferences
-    GamepadSettings.create().then((settings) {
-      if (!mounted) return;
-      setState(() {
-        _settings = settings;
-        _configs = settings.loadConfigs();
-      });
-    });
+    // Load pengaturan tombol dari SharedPreferences. Kegagalan di sini
+    // tidak boleh membuat layar kosong, jadi default sudah terpasang di atas.
+    _loadSettings();
 
     // Listen for disconnections automatically from the socket network manager
     _connectionSubscription = widget.socket.connectionStream.listen((isConnected) {
@@ -70,6 +67,20 @@ class _GamepadScreenState extends State<GamepadScreen> {
         _handleConnectionLoss();
       }
     });
+  }
+
+  Future<void> _loadSettings() async {
+    try {
+      final settings = await GamepadSettings.create();
+      if (!mounted) return;
+      setState(() {
+        _settings = settings;
+        _configs = settings.loadConfigs();
+      });
+    } catch (e, st) {
+      // Tetap pakai config default; hanya catat errornya.
+      debugPrint('Gagal memuat pengaturan tombol: $e\n$st');
+    }
   }
 
   /// Buka layar pengaturan tombol.
@@ -181,8 +192,11 @@ class _GamepadScreenState extends State<GamepadScreen> {
   /// Buat widget berposisi berdasarkan config tombol. Saat _editMode aktif,
   /// tombol bisa di-drag untuk mengganti posisinya secara visual.
   Widget _atc(BoxConstraints c, String id, Widget child, {double? wOverride, double? hOverride}) {
-    final cfg = _configs[id];
-    if (cfg == null) return const SizedBox.shrink();
+    final cfg = _configs[id] ?? DefaultButtonConfigs.defaultConfigs()[id];
+    if (cfg == null) {
+      debugPrint('Unknown button id: $id');
+      return const SizedBox.shrink();
+    }
 
     final w = (wOverride ?? cfg.width);
     final h = (hOverride ?? cfg.height);

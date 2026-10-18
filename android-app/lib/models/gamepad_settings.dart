@@ -53,21 +53,21 @@ class ButtonConfig {
 /// Default konfigurasi tombol yang cocok dengan layout asli gamepad screen.
 class DefaultButtonConfigs {
   static const List<Map<String, dynamic>> all = [
-    {'id': 'lt', 'xFrac': 0.078, 'yFrac': 0.182, 'width': 112, 'height': 112},
-    {'id': 'lb', 'xFrac': 0.184, 'yFrac': 0.339, 'width': 70, 'height': 70},
-    {'id': 'dpad', 'xFrac': 0.112, 'yFrac': 0.620, 'width': 180, 'height': 180},
-    {'id': 'settings', 'xFrac': 0.530, 'yFrac': 0.068, 'width': 44, 'height': 44},
-    {'id': 'disconnect', 'xFrac': 0.470, 'yFrac': 0.068, 'width': 50, 'height': 50},
-    {'id': 'menu', 'xFrac': 0.371, 'yFrac': 0.242, 'width': 60, 'height': 60},
-    {'id': 'guide', 'xFrac': 0.470, 'yFrac': 0.242, 'width': 68, 'height': 68},
-    {'id': 'start', 'xFrac': 0.570, 'yFrac': 0.242, 'width': 60, 'height': 60},
-    {'id': 'l3', 'xFrac': 0.416, 'yFrac': 0.475, 'width': 90, 'height': 56},
-    {'id': 'r3', 'xFrac': 0.526, 'yFrac': 0.475, 'width': 90, 'height': 56},
-    {'id': 'leftStick', 'xFrac': 0.310, 'yFrac': 0.751, 'width': 160, 'height': 160},
-    {'id': 'rightStick', 'xFrac': 0.685, 'yFrac': 0.751, 'width': 160, 'height': 160},
-    {'id': 'rb', 'xFrac': 0.815, 'yFrac': 0.346, 'width': 70, 'height': 70},
-    {'id': 'rt', 'xFrac': 0.922, 'yFrac': 0.182, 'width': 112, 'height': 112},
-    {'id': 'faceButtons', 'xFrac': 0.890, 'yFrac': 0.620, 'width': 150, 'height': 150},
+    {'id': 'lt', 'xFrac': 0.078, 'yFrac': 0.182, 'width': 112.0, 'height': 112.0},
+    {'id': 'lb', 'xFrac': 0.184, 'yFrac': 0.339, 'width': 70.0, 'height': 70.0},
+    {'id': 'dpad', 'xFrac': 0.112, 'yFrac': 0.620, 'width': 180.0, 'height': 180.0},
+    {'id': 'settings', 'xFrac': 0.530, 'yFrac': 0.068, 'width': 44.0, 'height': 44.0},
+    {'id': 'disconnect', 'xFrac': 0.470, 'yFrac': 0.068, 'width': 50.0, 'height': 50.0},
+    {'id': 'menu', 'xFrac': 0.371, 'yFrac': 0.242, 'width': 60.0, 'height': 60.0},
+    {'id': 'guide', 'xFrac': 0.470, 'yFrac': 0.242, 'width': 68.0, 'height': 68.0},
+    {'id': 'start', 'xFrac': 0.570, 'yFrac': 0.242, 'width': 60.0, 'height': 60.0},
+    {'id': 'l3', 'xFrac': 0.416, 'yFrac': 0.475, 'width': 90.0, 'height': 56.0},
+    {'id': 'r3', 'xFrac': 0.526, 'yFrac': 0.475, 'width': 90.0, 'height': 56.0},
+    {'id': 'leftStick', 'xFrac': 0.310, 'yFrac': 0.751, 'width': 160.0, 'height': 160.0},
+    {'id': 'rightStick', 'xFrac': 0.685, 'yFrac': 0.751, 'width': 160.0, 'height': 160.0},
+    {'id': 'rb', 'xFrac': 0.815, 'yFrac': 0.346, 'width': 70.0, 'height': 70.0},
+    {'id': 'rt', 'xFrac': 0.922, 'yFrac': 0.182, 'width': 112.0, 'height': 112.0},
+    {'id': 'faceButtons', 'xFrac': 0.890, 'yFrac': 0.620, 'width': 150.0, 'height': 150.0},
   ];
 
   static String labelFor(String id) {
@@ -149,19 +149,23 @@ class GamepadSettings {
     _prefs.setDouble(_sizeMultiplierKey, value);
   }
 
-  Map<String, ButtonConfig> _buildFromDefaults() {
+  /// Config default tanpa menyentuh SharedPreferences. Dipakai sebagai
+  /// fallback supaya UI tetap menampilkan tombol walau prefs gagal dimuat.
+  static Map<String, ButtonConfig> defaultConfigs() {
     final Map<String, ButtonConfig> configs = {};
     for (final d in DefaultButtonConfigs.all) {
       configs[d['id'] as String] = ButtonConfig(
         id: d['id'] as String,
-        xFrac: d['xFrac'] as double,
-        yFrac: d['yFrac'] as double,
-        width: d['width'] as double,
-        height: d['height'] as double,
+        xFrac: (d['xFrac'] as num).toDouble(),
+        yFrac: (d['yFrac'] as num).toDouble(),
+        width: (d['width'] as num).toDouble(),
+        height: (d['height'] as num).toDouble(),
       );
     }
     return configs;
   }
+
+  Map<String, ButtonConfig> _buildFromDefaults() => defaultConfigs();
 
   /// Reset semua config ke default.
   Map<String, ButtonConfig> resetToDefaults() {
