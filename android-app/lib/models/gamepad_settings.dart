@@ -90,6 +90,22 @@ class DefaultButtonConfigs {
       default: return id;
     }
   }
+
+  /// Config default tanpa menyentuh SharedPreferences. Dipakai sebagai
+  /// fallback supaya UI tetap menampilkan tombol walau prefs gagal dimuat.
+  static Map<String, ButtonConfig> defaultConfigs() {
+    final Map<String, ButtonConfig> configs = {};
+    for (final d in all) {
+      configs[d['id'] as String] = ButtonConfig(
+        id: d['id'] as String,
+        xFrac: (d['xFrac'] as num).toDouble(),
+        yFrac: (d['yFrac'] as num).toDouble(),
+        width: (d['width'] as num).toDouble(),
+        height: (d['height'] as num).toDouble(),
+      );
+    }
+    return configs;
+  }
 }
 
 /// Manajemen penyimpanan pengaturan tombol lewat SharedPreferences.
@@ -151,21 +167,9 @@ class GamepadSettings {
 
   /// Config default tanpa menyentuh SharedPreferences. Dipakai sebagai
   /// fallback supaya UI tetap menampilkan tombol walau prefs gagal dimuat.
-  static Map<String, ButtonConfig> defaultConfigs() {
-    final Map<String, ButtonConfig> configs = {};
-    for (final d in DefaultButtonConfigs.all) {
-      configs[d['id'] as String] = ButtonConfig(
-        id: d['id'] as String,
-        xFrac: (d['xFrac'] as num).toDouble(),
-        yFrac: (d['yFrac'] as num).toDouble(),
-        width: (d['width'] as num).toDouble(),
-        height: (d['height'] as num).toDouble(),
-      );
-    }
-    return configs;
-  }
+  static Map<String, ButtonConfig> defaultConfigs() => DefaultButtonConfigs.defaultConfigs();
 
-  Map<String, ButtonConfig> _buildFromDefaults() => defaultConfigs();
+  Map<String, ButtonConfig> _buildFromDefaults() => DefaultButtonConfigs.defaultConfigs();
 
   /// Reset semua config ke default.
   Map<String, ButtonConfig> resetToDefaults() {
