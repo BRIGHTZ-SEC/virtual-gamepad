@@ -1,4 +1,4 @@
-name: Build Android APK (Debug)
+name: Build Android APK (Release)
 
 on:
   push:
@@ -34,12 +34,79 @@ jobs:
       - name: Apply our AndroidManifest (permissions + orientation)
         run: cp manifest-overrides/AndroidManifest.xml android/app/src/main/AndroidManifest.xml
 
-      - name: Build debug APK
-        run: flutter build apk --debug --build-number=1
+      # Upstream keeps its signing key in GitHub Secrets, and forks do not
+      # inherit Secrets. So we generate our own key once and cache it, which
+      # keeps the certificate stable across builds (Android requires the same
+      # certificate to install an update over an existing app).
+      - name: Restore cached signing keystore
+        uses: actions/cache@v4
+        with:
+          path: android-app/release-key.jks
+          key: vgamepad-release-keystore-v1
 
-      - name: Upload APK artifact
+      - name: Generate signing keystore if absent
+        run: |
+          if [ ! -f release-key.jks ]; then
+            echo "No cached keystore found, generating a new one."
+            keytool -genkeypair -v \
+              -keystore release-key.jks \
+              -storetype JKS \
+              -keyalg RSA \
+              -keysize 2048 \
+              -validity 10950 \
+              -alias vgamepad \
+              -storepass vgamepad \
+              -keypass vgamepad \
+              -dname "CN=Virtual Gamepad, OU=Fork Build, O=BRIGHTZ-SEC, C=ID"
+          else
+            echo "Using cached keystore."
+          fi
+
+      - name: Build unsigned release APKs (split per ABI + universal)
+        run: |
+          flutter build apk --release --split-per-abi --build-number=1
+          flutter build apk --release --build-number=1
+
+      # Sign every produced APK with apksigner. This avoids fragile edits to
+      # build.gradle(.kts) across differing Flutter templates.
+      - name: Sign APKs with apksigner
+        run: |
+          set -e
+          BT="$(ls -d "$ANDROID_HOME"/build-tools/*/ | sort -V | tail -1)"
+          echo "Using build-tools: $BT"
+          mkdir -p signed
+          for apk in build/app/outputs/flutter-apk/*.apk; do
+            name="$(basename "$apk" .apk)"
+            "$BT/zipalign" -f -v 4 "$apk" "signed/${name}-aligned.apk" >/dev/null
+            "$BT/apksigner" sign \
+              --ks release-key.jks \
+              --ks-pass pass:vgamepad \
+              --key-pass pass:vgamepad \
+              --ks-key-alias vgamepad \
+              --out "signed/${name}.apk" \
+              "signed/${name}-aligned.apk"
+            "$BT/apksigner" verify --verbose "signed/${name}.apk" | head -5
+            echo "Signed: signed/${name}.apk"
+          done
+          rm -f signed/*-aligned.apk
+
+      - name: Report APK sizes
+        run: |
+          echo "=== Unsigned (raw build) ==="
+          ls -lh build/app/outputs/flutter-apk/*.apk || true
+          echo "=== Signed (deliverables) ==="
+          ls -lh signed/*.apk || true
+
+      - name: Upload signed universal APK
         uses: actions/upload-artifact@v4
         with:
-          name: virtual-gamepad-debug
-          path: android-app/build/app/outputs/flutter-apk/app-debug.apk
+          name: virtual-gamepad-release
+          path: android-app/signed/app-release.apk
           if-no-files-found: error
+
+      - name: Upload signed split-per-ABI APKs
+        uses: actions/upload-artifact@v4
+        with:
+          name: virtual-gamepad-release-split
+          path: android-app/signed/app-*-release.apk
+          if-no-files-found: warn
