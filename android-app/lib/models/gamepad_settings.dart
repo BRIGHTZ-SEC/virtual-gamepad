@@ -57,6 +57,8 @@ class DefaultButtonConfigs {
     {'id': 'lb', 'xFrac': 0.184, 'yFrac': 0.339, 'width': 70.0, 'height': 70.0},
     {'id': 'dpad', 'xFrac': 0.112, 'yFrac': 0.620, 'width': 180.0, 'height': 180.0},
     {'id': 'settings', 'xFrac': 0.530, 'yFrac': 0.068, 'width': 44.0, 'height': 44.0},
+    {'id': 'saveLayout', 'xFrac': 0.590, 'yFrac': 0.068, 'width': 44.0, 'height': 44.0},
+    {'id': 'resetLayout', 'xFrac': 0.650, 'yFrac': 0.068, 'width': 44.0, 'height': 44.0},
     {'id': 'disconnect', 'xFrac': 0.470, 'yFrac': 0.068, 'width': 50.0, 'height': 50.0},
     {'id': 'menu', 'xFrac': 0.371, 'yFrac': 0.242, 'width': 60.0, 'height': 60.0},
     {'id': 'guide', 'xFrac': 0.470, 'yFrac': 0.242, 'width': 68.0, 'height': 68.0},
@@ -77,6 +79,8 @@ class DefaultButtonConfigs {
       case 'dpad': return 'D-pad';
       case 'disconnect': return 'Disconnect';
       case 'settings': return 'Pengaturan (Gear)';
+      case 'saveLayout': return 'Simpan Layout';
+      case 'resetLayout': return 'Reset Layout';
       case 'menu': return 'Menu / Back';
       case 'guide': return 'Guide / Xbox';
       case 'start': return 'Start';

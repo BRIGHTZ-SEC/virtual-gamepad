@@ -7,7 +7,6 @@ import '../models/gamepad_settings.dart';
 import '../models/gamepad_state.dart';
 import '../network/gamepad_socket.dart';
 import '../network/protocol.dart';
-import '../screens/settings_screen.dart';
 import '../theme.dart';
 import '../widgets/dpad_widget.dart';
 import '../widgets/gamepad_button_widget.dart';
@@ -32,6 +31,9 @@ class _GamepadScreenState extends State<GamepadScreen> {
   // SharedPreferences belum selesai dimuat atau gagal dimuat.
   Map<String, ButtonConfig> _configs = DefaultButtonConfigs.defaultConfigs();
   bool _editMode = false;
+
+  // State gesture untuk mode edit: ukuran awal saat pinch dimulai.
+  final Map<String, (double, double)> _gestureStartSizes = {};
 
   // Track D-pad states to only vibrate when a direction is freshly clicked down
   bool _upPressed = false;
@@ -86,17 +88,47 @@ class _GamepadScreenState extends State<GamepadScreen> {
     }
   }
 
-  /// Buka layar pengaturan tombol.
-  Future<void> _openSettings() async {
-    await Navigator.of(context).push(
-      MaterialPageRoute(
-        builder: (_) => SettingsScreen(
-          settings: _settings,
-          configs: Map<String, ButtonConfig>.from(_configs),
-          onSave: (newConfigs) {
-            setState(() => _configs = newConfigs);
-          },
-        ),
+  /// Toggle mode edit: saat aktif, tiap tombol bisa digeser (drag) dan
+  /// diperbesar/diperkecil (pinch 2 jari) langsung di layar gamepad.
+  void _toggleEditMode() {
+    HapticFeedback.mediumImpact();
+    setState(() => _editMode = !_editMode);
+    if (!_editMode) {
+      // Keluar dari edit mode = simpan hasil editan.
+      _saveLayout();
+    } else {
+      _banner(
+        'Mode Edit: geser tombol untuk pindah, cubit 2 jari untuk ubah ukuran.',
+        AppColors.accentLight,
+      );
+    }
+  }
+
+  /// Simpan layout saat ini ke penyimpanan.
+  void _saveLayout() {
+    try {
+      _settings.saveConfigs(_configs);
+      _settings.saveSizeMultiplier(1.0);
+    } catch (e) {
+      debugPrint('Gagal menyimpan layout: $e');
+    }
+    _banner('Layout tersimpan.', AppColors.buttonA);
+  }
+
+  /// Reset semua tombol ke posisi & ukuran default.
+  void _resetLayout() {
+    HapticFeedback.heavyImpact();
+    setState(() => _configs = DefaultButtonConfigs.defaultConfigs());
+    _saveLayout();
+  }
+
+  void _banner(String message, Color color) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(message),
+        backgroundColor: color.withOpacity(0.9),
+        duration: const Duration(milliseconds: 1400),
       ),
     );
   }
@@ -193,6 +225,11 @@ class _GamepadScreenState extends State<GamepadScreen> {
 
   /// Buat widget berposisi berdasarkan config tombol. Saat _editMode aktif,
   /// tombol bisa di-drag untuk mengganti posisinya secara visual.
+  /// Membangun widget tombol pada posisi dari config.
+  ///
+  /// Saat [_editMode] aktif, tombol bisa digeser satu jari dan diubah
+  /// ukurannya dengan cubitan dua jari. Editan hanya berlaku di config
+  /// in-memory dan disimpan ke [_saveLayout] saat mode edit dimatikan.
   Widget _atc(BoxConstraints c, String id, Widget child, {double? wOverride, double? hOverride}) {
     final cfg = _configs[id] ?? DefaultButtonConfigs.defaultConfigs()[id];
     if (cfg == null) {
@@ -203,41 +240,100 @@ class _GamepadScreenState extends State<GamepadScreen> {
     final w = (wOverride ?? cfg.width);
     final h = (hOverride ?? cfg.height);
 
-    if (_editMode) {
-      // Positioned harus tetap menjadi anak langsung Stack, jadi
-      // GestureDetector dibungkus DI DALAM-nya, bukan sebaliknya.
+    if (!_editMode) {
       return Positioned(
         left: c.maxWidth * cfg.xFrac - w / 2,
         top: c.maxHeight * cfg.yFrac - h / 2,
         width: w,
         height: h,
-        child: GestureDetector(
-          behavior: HitTestBehavior.translucent,
-          onPanUpdate: (d) {
-            final current = _configs[id];
-            if (current == null) return;
-            final curLeft = c.maxWidth * current.xFrac - w / 2;
-            final curTop = c.maxHeight * current.yFrac - h / 2;
-            final newLeft = curLeft + d.delta.dx;
-            final newTop = curTop + d.delta.dy;
-            setState(() {
-              _configs[id] = current.copyWith(
-                xFrac: ((newLeft + w / 2) / c.maxWidth).clamp(0.0, 1.0),
-                yFrac: ((newTop + h / 2) / c.maxHeight).clamp(0.0, 1.0),
-              );
-            });
-          },
-          child: Center(child: child),
-        ),
+        child: Center(child: child),
       );
     }
+
+    // --- Mode edit: drag untuk pindah, pinch untuk ubah ukuran. ---
+    // Semua state gesture disimpan di field agar tidak hilang saat rebuild
+    // dan tidak saling menimpa antara drag dan pinch.
+    final startW = _gestureStartSizes[id]?.$1 ?? w;
+    final startH = _gestureStartSizes[id]?.$2 ?? h;
+
+    Widget interactive = GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onScaleStart: (d) {
+        final cur = _configs[id] ?? cfg;
+        _gestureStartSizes[id] = (cur.width, cur.height);
+        HapticFeedback.selectionClick();
+      },
+      onScaleUpdate: (d) {
+        final cur = _configs[id] ?? cfg;
+        setState(() {
+          if (d.pointerCount >= 2) {
+            // Dua jari: ubah ukuran, posisi tidak berubah.
+            final nw = (startW * d.scale).clamp(36.0, 360.0);
+            final nh = (startH * d.scale).clamp(36.0, 360.0);
+            _configs[id] = cur.copyWith(width: nw, height: nh);
+          } else {
+            // Satu jari: geser posisi mengikuti delta focal point (piksel
+            // logikal global), lalu dinormalisasi ke fraksi 0..1.
+            final dx = d.focalPointDelta.dx / c.maxWidth;
+            final dy = d.focalPointDelta.dy / c.maxHeight;
+            _configs[id] = cur.copyWith(
+              xFrac: (cur.xFrac + dx).clamp(0.0, 1.0),
+              yFrac: (cur.yFrac + dy).clamp(0.0, 1.0),
+            );
+          }
+        });
+      },
+      onScaleEnd: (_) {
+        _gestureStartSizes.remove(id);
+      },
+      child: Center(child: child),
+    );
 
     return Positioned(
       left: c.maxWidth * cfg.xFrac - w / 2,
       top: c.maxHeight * cfg.yFrac - h / 2,
       width: w,
       height: h,
-      child: Center(child: child),
+      child: Stack(
+        clipBehavior: Clip.none,
+        children: [
+          Positioned.fill(child: interactive),
+          Positioned.fill(
+            child: IgnorePointer(
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  border: Border.all(color: AppColors.accent, width: 2),
+                  borderRadius: BorderRadius.circular(8),
+                ),
+              ),
+            ),
+          ),
+          Positioned(
+            top: -6,
+            left: 0,
+            right: 0,
+            child: IgnorePointer(
+              child: Center(
+                child: Container(
+                  padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                  decoration: BoxDecoration(
+                    color: AppColors.accent,
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                  child: Text(
+                    '${w.toInt()}×${h.toInt()}',
+                    style: const TextStyle(
+                      fontSize: 9,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.black,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
     );
   }
 
@@ -312,21 +408,64 @@ class _GamepadScreenState extends State<GamepadScreen> {
                         ),
                       )),
 
-                  // Settings / Gear - Top Center Right
+                  // Settings / Gear - toggles edit mode
                   _atc(c, 'settings',
                       GestureDetector(
-                        onTap: _openSettings,
+                        onTap: _toggleEditMode,
                         child: Container(
                           width: 44,
                           height: 44,
                           alignment: Alignment.center,
-                          decoration: const BoxDecoration(
-                            color: AppColors.stickFill,
+                          decoration: BoxDecoration(
+                            color: _editMode ? AppColors.accent : AppColors.stickFill,
                             shape: BoxShape.circle,
                           ),
-                          child: const Icon(Icons.settings, color: Colors.white, size: 22),
+                          child: Icon(
+                            _editMode ? Icons.check : Icons.settings,
+                            color: _editMode ? Colors.black : Colors.white,
+                            size: 22,
+                          ),
                         ),
                       )),
+
+                  // Save button - only while editing
+                  if (_editMode)
+                    _atc(c, 'saveLayout',
+                        GestureDetector(
+                          onTap: () {
+                            setState(() => _editMode = false);
+                            _saveLayout();
+                          },
+                          child: Container(
+                            width: 44,
+                            height: 44,
+                            alignment: Alignment.center,
+                            decoration: const BoxDecoration(
+                              color: AppColors.buttonA,
+                              shape: BoxShape.circle,
+                            ),
+                            child: const Icon(Icons.save,
+                                color: Colors.black, size: 22),
+                          ),
+                        )),
+
+                  // Reset button - only while editing
+                  if (_editMode)
+                    _atc(c, 'resetLayout',
+                        GestureDetector(
+                          onTap: _resetLayout,
+                          child: Container(
+                            width: 44,
+                            height: 44,
+                            alignment: Alignment.center,
+                            decoration: const BoxDecoration(
+                              color: AppColors.buttonB,
+                              shape: BoxShape.circle,
+                            ),
+                            child: const Icon(Icons.restart_alt,
+                                color: Colors.white, size: 22),
+                          ),
+                        )),
 
                   // Menu / Guide / Start Row
                   _atc(c, 'menu',
