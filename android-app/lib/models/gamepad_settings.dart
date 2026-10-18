@@ -109,22 +109,60 @@ class DefaultButtonConfigs {
 }
 
 /// Manajemen penyimpanan pengaturan tombol lewat SharedPreferences.
+///
+/// Kalau SharedPreferences tidak tersedia (mis. plugin belum terdaftar atau
+/// gagal diinisialisasi), objek ini otomatis jatuh ke penyimpanan in-memory
+/// supaya fitur pengaturan tetap bisa dipakai albeit tidak persisten.
 class GamepadSettings {
   static const String _prefsKey = 'gamepad_button_configs';
   static const String _sizeMultiplierKey = 'gamepad_size_multiplier';
 
-  final SharedPreferences _prefs;
+  final SharedPreferences? _prefs;
+  final Map<String, dynamic> _memory = <String, dynamic>{};
 
   GamepadSettings._internal(this._prefs);
 
+  /// Instance yang langsung tersedia tanpa menunggu plugin, memakai
+  /// penyimpanan in-memory. Dipakai supaya UI tidak pernah terblokir.
+  static GamepadSettings fallback() => GamepadSettings._internal(null);
+
+  /// Selalu mengembalikan instance yang valid; tidak pernah melempar error.
   static Future<GamepadSettings> create() async {
-    final prefs = await SharedPreferences.getInstance();
-    return GamepadSettings._internal(prefs);
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      return GamepadSettings._internal(prefs);
+    } catch (e) {
+      // Fallback ke penyimpanan in-memory.
+      return GamepadSettings._internal(null);
+    }
   }
+
+  String? _getString(String key) => _prefs?.getString(key) ?? _memory[key] as String?;
+
+  double? _getDouble(String key) => _prefs?.getDouble(key) ?? _memory[key] as double?;
+
+  void _setString(String key, String value) {
+    if (_prefs != null) {
+      _prefs!.setString(key, value);
+    } else {
+      _memory[key] = value;
+    }
+  }
+
+  void _setDouble(String key, double value) {
+    if (_prefs != null) {
+      _prefs!.setDouble(key, value);
+    } else {
+      _memory[key] = value;
+    }
+  }
+
+  /// True bila pengaturan tersimpan permanen (bukan fallback in-memory).
+  bool get isPersistent => _prefs != null;
 
   /// Load semua config dari prefs, kalau belum ada pakai default.
   Map<String, ButtonConfig> loadConfigs() {
-    final jsonStr = _prefs.getString(_prefsKey);
+    final jsonStr = _getString(_prefsKey);
     if (jsonStr == null) {
       return _buildFromDefaults();
     }
@@ -152,17 +190,17 @@ class GamepadSettings {
   /// Simpan semua config ke prefs.
   void saveConfigs(Map<String, ButtonConfig> configs) {
     final list = configs.values.map((c) => c.toJson()).toList();
-    _prefs.setString(_prefsKey, jsonEncode(list));
+    _setString(_prefsKey, jsonEncode(list));
   }
 
   /// Load size multiplier (1.0 = default).
   double loadSizeMultiplier() {
-    return _prefs.getDouble(_sizeMultiplierKey) ?? 1.0;
+    return _getDouble(_sizeMultiplierKey) ?? 1.0;
   }
 
   /// Simpan size multiplier.
   void saveSizeMultiplier(double value) {
-    _prefs.setDouble(_sizeMultiplierKey, value);
+    _setDouble(_sizeMultiplierKey, value);
   }
 
   /// Config default tanpa menyentuh SharedPreferences. Dipakai sebagai

@@ -25,7 +25,9 @@ class GamepadScreen extends StatefulWidget {
 class _GamepadScreenState extends State<GamepadScreen> {
   late final GamepadState _state;
   StreamSubscription? _connectionSubscription; // Handles the socket listener state
-  GamepadSettings? _settings;
+  // Selalu non-null: mulai dari instance in-memory supaya ikon pengaturan
+  // selalu bisa dibuka, walau SharedPreferences gagal dimuat belakangan.
+  GamepadSettings _settings = GamepadSettings.fallback();
   // Mulai dari default sinkron supaya tombol langsung tampil walau
   // SharedPreferences belum selesai dimuat atau gagal dimuat.
   Map<String, ButtonConfig> _configs = DefaultButtonConfigs.defaultConfigs();
@@ -73,23 +75,23 @@ class _GamepadScreenState extends State<GamepadScreen> {
     try {
       final settings = await GamepadSettings.create();
       if (!mounted) return;
+      final loaded = settings.loadConfigs();
       setState(() {
         _settings = settings;
-        _configs = settings.loadConfigs();
+        _configs = loaded;
       });
     } catch (e, st) {
-      // Tetap pakai config default; hanya catat errornya.
+      // Tetap pakai fallback in-memory; hanya catat errornya.
       debugPrint('Gagal memuat pengaturan tombol: $e\n$st');
     }
   }
 
   /// Buka layar pengaturan tombol.
   Future<void> _openSettings() async {
-    if (_settings == null) return;
     await Navigator.of(context).push(
       MaterialPageRoute(
         builder: (_) => SettingsScreen(
-          settings: _settings!,
+          settings: _settings,
           configs: Map<String, ButtonConfig>.from(_configs),
           onSave: (newConfigs) {
             setState(() => _configs = newConfigs);
@@ -201,35 +203,42 @@ class _GamepadScreenState extends State<GamepadScreen> {
     final w = (wOverride ?? cfg.width);
     final h = (hOverride ?? cfg.height);
 
-    Widget content = Positioned(
+    if (_editMode) {
+      // Positioned harus tetap menjadi anak langsung Stack, jadi
+      // GestureDetector dibungkus DI DALAM-nya, bukan sebaliknya.
+      return Positioned(
+        left: c.maxWidth * cfg.xFrac - w / 2,
+        top: c.maxHeight * cfg.yFrac - h / 2,
+        width: w,
+        height: h,
+        child: GestureDetector(
+          behavior: HitTestBehavior.translucent,
+          onPanUpdate: (d) {
+            final current = _configs[id];
+            if (current == null) return;
+            final curLeft = c.maxWidth * current.xFrac - w / 2;
+            final curTop = c.maxHeight * current.yFrac - h / 2;
+            final newLeft = curLeft + d.delta.dx;
+            final newTop = curTop + d.delta.dy;
+            setState(() {
+              _configs[id] = current.copyWith(
+                xFrac: ((newLeft + w / 2) / c.maxWidth).clamp(0.0, 1.0),
+                yFrac: ((newTop + h / 2) / c.maxHeight).clamp(0.0, 1.0),
+              );
+            });
+          },
+          child: Center(child: child),
+        ),
+      );
+    }
+
+    return Positioned(
       left: c.maxWidth * cfg.xFrac - w / 2,
       top: c.maxHeight * cfg.yFrac - h / 2,
       width: w,
       height: h,
       child: Center(child: child),
     );
-
-    if (_editMode) {
-      content = GestureDetector(
-        onPanUpdate: (d) {
-          final current = _configs[id];
-          if (current == null) return;
-          final curLeft = c.maxWidth * current.xFrac - w / 2;
-          final curTop = c.maxHeight * current.yFrac - h / 2;
-          final newLeft = curLeft + d.delta.dx;
-          final newTop = curTop + d.delta.dy;
-          setState(() {
-            _configs[id] = current.copyWith(
-              xFrac: ((newLeft + w / 2) / c.maxWidth).clamp(0.0, 1.0),
-              yFrac: ((newTop + h / 2) / c.maxHeight).clamp(0.0, 1.0),
-            );
-          });
-        },
-        child: content,
-      );
-    }
-
-    return content;
   }
 
   @override
