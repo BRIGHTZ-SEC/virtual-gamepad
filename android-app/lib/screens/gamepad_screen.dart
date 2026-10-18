@@ -35,6 +35,20 @@ class _GamepadScreenState extends State<GamepadScreen> {
   // State gesture untuk mode edit: ukuran awal saat pinch dimulai.
   final Map<String, (double, double)> _gestureStartSizes = {};
 
+  /// Rasio ukuran tombol saat ini dibanding ukuran default-nya (1.0 = default).
+  /// Dipakai agar isi tombol (bukan cuma kotak luarnya) ikut membesar/perkecil
+  /// ketika pengguna melakukan pinch di mode edit.
+  double _scaleOf(String id) {
+    final cfg = _configs[id];
+    if (cfg == null) return 1.0;
+    final def = DefaultButtonConfigs.defaultConfigs()[id];
+    if (def == null || def.width <= 0) return 1.0;
+    return cfg.width / def.width;
+  }
+
+  /// Ukuran inner widget untuk tombol [id], mengikuti skala config.
+  double _innerSize(String id, double base) => base * _scaleOf(id);
+
   // Track D-pad states to only vibrate when a direction is freshly clicked down
   bool _upPressed = false;
   bool _downPressed = false;
@@ -358,8 +372,8 @@ class _GamepadScreenState extends State<GamepadScreen> {
                   // LT - Left Trigger
                   _atc(c, 'lt',
                       TriggerWidget(
-                        label: 'LT', 
-                        size: 112, 
+                        label: 'LT',
+                        size: _innerSize('lt', 112), 
                         onChanged: (v) {
                           _handleTriggerHaptic(v, true);
                           _state.setLeftTrigger(v);
@@ -370,7 +384,7 @@ class _GamepadScreenState extends State<GamepadScreen> {
                   _atc(c, 'lb',
                       GamepadButtonWidget(
                         label: 'LB',
-                        size: 70,
+                        size: _innerSize('lb', 70),
                         color: AppColors.stickFill,
                         onChanged: (p) => _handleButtonPress(Protocol.bitLb, p),
                       )),
@@ -378,7 +392,7 @@ class _GamepadScreenState extends State<GamepadScreen> {
                   // D-pad - Lower Left
                   _atc(c, 'dpad',
                       DpadWidget(
-                        size: 150,
+                        size: _innerSize('dpad', 150),
                         onChanged: ({required up, required down, required left, required right}) {
                           if ((up && !_upPressed) || 
                               (down && !_downPressed) || 
@@ -413,8 +427,8 @@ class _GamepadScreenState extends State<GamepadScreen> {
                       GestureDetector(
                         onTap: _toggleEditMode,
                         child: Container(
-                          width: 44,
-                          height: 44,
+                          width: _innerSize('settings', 44),
+                          height: _innerSize('settings', 44),
                           alignment: Alignment.center,
                           decoration: BoxDecoration(
                             color: _editMode ? AppColors.accent : AppColors.stickFill,
@@ -437,8 +451,8 @@ class _GamepadScreenState extends State<GamepadScreen> {
                             _saveLayout();
                           },
                           child: Container(
-                            width: 44,
-                            height: 44,
+                            width: _innerSize('saveLayout', 44),
+                            height: _innerSize('saveLayout', 44),
                             alignment: Alignment.center,
                             decoration: const BoxDecoration(
                               color: AppColors.buttonA,
@@ -455,8 +469,8 @@ class _GamepadScreenState extends State<GamepadScreen> {
                         GestureDetector(
                           onTap: _resetLayout,
                           child: Container(
-                            width: 44,
-                            height: 44,
+                            width: _innerSize('resetLayout', 44),
+                            height: _innerSize('resetLayout', 44),
                             alignment: Alignment.center,
                             decoration: const BoxDecoration(
                               color: AppColors.buttonB,
@@ -472,7 +486,7 @@ class _GamepadScreenState extends State<GamepadScreen> {
                       GamepadButtonWidget(
                         label: '',
                         icon: Icons.menu,
-                        size: 60,
+                        size: _innerSize('menu', 60),
                         color: AppColors.stickFill,
                         onChanged: (p) => _handleButtonPress(Protocol.bitBack, p),
                       )),
@@ -480,7 +494,7 @@ class _GamepadScreenState extends State<GamepadScreen> {
                       GamepadButtonWidget(
                         label: '',
                         icon: Icons.sports_esports,
-                        size: 68,
+                        size: _innerSize('guide', 68),
                         color: AppColors.stickFill,
                         onChanged: (p) => _handleButtonPress(Protocol.bitGuide, p),
                       )),
@@ -488,7 +502,7 @@ class _GamepadScreenState extends State<GamepadScreen> {
                       GamepadButtonWidget(
                         label: '',
                         icon: Icons.tune,
-                        size: 60,
+                        size: _innerSize('start', 60),
                         color: AppColors.stickFill,
                         onChanged: (p) => _handleButtonPress(Protocol.bitStart, p),
                       )),
@@ -498,7 +512,7 @@ class _GamepadScreenState extends State<GamepadScreen> {
                       GamepadButtonWidget(
                         label: 'LEFT',
                         pill: true,
-                        size: 40,
+                        size: _innerSize('l3', 40),
                         color: AppColors.stickFill,
                         onChanged: (p) => _handleButtonPress(Protocol.bitLsClick, p),
                       )),
@@ -506,7 +520,7 @@ class _GamepadScreenState extends State<GamepadScreen> {
                       GamepadButtonWidget(
                         label: 'RIGHT',
                         pill: true,
-                        size: 40,
+                        size: _innerSize('r3', 40),
                         color: AppColors.stickFill,
                         onChanged: (p) => _handleButtonPress(Protocol.bitRsClick, p),
                       )),
@@ -514,7 +528,7 @@ class _GamepadScreenState extends State<GamepadScreen> {
                   // Left stick
                   _atc(c, 'leftStick',
                       JoystickWidget(
-                        size: 160, 
+                        size: _innerSize('leftStick', 160),
                         onChanged: (x, y) {
                           _handleJoystickHaptic(x, y, true);
                           _state.setLeftStick(x, y);
@@ -524,7 +538,7 @@ class _GamepadScreenState extends State<GamepadScreen> {
                   // Right stick
                   _atc(c, 'rightStick',
                       JoystickWidget(
-                        size: 160, 
+                        size: _innerSize('rightStick', 160),
                         onChanged: (x, y) {
                           _handleJoystickHaptic(x, y, false);
                           _state.setRightStick(x, y);
@@ -535,7 +549,7 @@ class _GamepadScreenState extends State<GamepadScreen> {
                   _atc(c, 'rb',
                       GamepadButtonWidget(
                         label: 'RB',
-                        size: 70,
+                        size: _innerSize('rb', 70),
                         color: AppColors.stickFill,
                         onChanged: (p) => _handleButtonPress(Protocol.bitRb, p),
                       )),
@@ -544,7 +558,7 @@ class _GamepadScreenState extends State<GamepadScreen> {
                   _atc(c, 'rt',
                       TriggerWidget(
                         label: 'RT',
-                        size: 112,
+                        size: _innerSize('rt', 112),
                         onChanged: (v) {
                           _handleTriggerHaptic(v, false);
                           _state.setRightTrigger(v);
@@ -553,7 +567,10 @@ class _GamepadScreenState extends State<GamepadScreen> {
 
                   // ABXY Diamond Layout
                   _atc(c, 'faceButtons', 
-                      _FaceButtons(onButtonPressed: _handleButtonPress, size: 150)),
+                      _FaceButtons(
+                        onButtonPressed: _handleButtonPress,
+                        size: _innerSize('faceButtons', 150),
+                        buttonSize: _innerSize('faceButtons', 56))),
                 ],
               );
             },
@@ -567,7 +584,12 @@ class _GamepadScreenState extends State<GamepadScreen> {
 class _FaceButtons extends StatelessWidget {
   final void Function(int buttonBit, bool isPressed) onButtonPressed;
   final double size;
-  const _FaceButtons({required this.onButtonPressed, required this.size});
+  final double buttonSize;
+  const _FaceButtons({
+    required this.onButtonPressed,
+    required this.size,
+    this.buttonSize = 56,
+  });
 
   @override
   Widget build(BuildContext context) {
@@ -581,6 +603,7 @@ class _FaceButtons extends StatelessWidget {
             top: 0,
             child: GamepadButtonWidget(
               label: 'Y',
+              size: buttonSize,
               color: AppColors.buttonY,
               onChanged: (p) => onButtonPressed(Protocol.bitY, p),
             ),
@@ -589,6 +612,7 @@ class _FaceButtons extends StatelessWidget {
             bottom: 0,
             child: GamepadButtonWidget(
               label: 'A',
+              size: buttonSize,
               color: AppColors.buttonA,
               onChanged: (p) => onButtonPressed(Protocol.bitA, p),
             ),
@@ -597,6 +621,7 @@ class _FaceButtons extends StatelessWidget {
             left: 0,
             child: GamepadButtonWidget(
               label: 'X',
+              size: buttonSize,
               color: AppColors.buttonX,
               onChanged: (p) => onButtonPressed(Protocol.bitX, p),
             ),
@@ -605,6 +630,7 @@ class _FaceButtons extends StatelessWidget {
             right: 0,
             child: GamepadButtonWidget(
               label: 'B',
+              size: buttonSize,
               color: AppColors.buttonB,
               onChanged: (p) => onButtonPressed(Protocol.bitB, p),
             ),
